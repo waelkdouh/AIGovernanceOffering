@@ -233,13 +233,23 @@ def ensure_product_api_link(
     product_id: str,
     api_id: str,
 ) -> None:
-    """Link an API to a product (idempotent)."""
+    """Link an API to a product (idempotent).
+
+    Uses the classic product-API association endpoint
+    (`/products/{productId}/apis/{apiId}`), which is supported by the
+    `API_VERSION` pinned above. The newer `apiLinks` collection only exists in
+    2023-03-01-preview and later; calling it with an older api-version makes
+    ARM reject the URL with a generic `ResourceNotFound` / "request did not
+    have proper uri path format" error.
+
+    The PUT takes no request body and returns 201 on first link, 200 if the
+    API is already associated with the product.
+    """
     url = (
         f"{_service_scope(subscription_id, resource_group, apim_name)}"
-        f"/products/{product_id}/apiLinks/{api_id}"
+        f"/products/{product_id}/apis/{api_id}"
     )
-    body = {"properties": {"apiId": f"/apis/{api_id}"}}
-    _request("PUT", url, json_body=body, ok_statuses=[200, 201, 204])
+    _request("PUT", url, ok_statuses=[200, 201, 204])
 
 
 def ensure_subscription(

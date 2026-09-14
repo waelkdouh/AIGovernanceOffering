@@ -1,0 +1,83 @@
+"""Display helpers: headers, banners, tables, and charts for the notebooks."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Iterable, List, Optional
+
+try:
+    from IPython.display import display, Markdown, HTML
+except ImportError:  # pragma: no cover - allows import outside Jupyter
+    display = print  # type: ignore
+
+    def Markdown(text):  # type: ignore
+        return text
+
+    def HTML(text):  # type: ignore
+        return text
+
+
+def header(text: str, level: int = 2) -> None:
+    """Render a markdown-style header in a notebook (or print it plainly)."""
+    display(Markdown(f"{'#' * level} {text}"))
+
+
+def banner(text: str, kind: str = "info") -> None:
+    """Render a short highlighted status line.
+
+    kind: one of "info", "success", "warning", "error"
+    """
+    colors = {
+        "info": "#0969da",
+        "success": "#1a7f37",
+        "warning": "#9a6700",
+        "error": "#cf222e",
+    }
+    color = colors.get(kind, colors["info"])
+    display(
+        HTML(
+            f'<div style="border-left:4px solid {color}; padding:6px 12px; '
+            f'margin:6px 0; background:#f6f8fa;"><strong>{text}</strong></div>'
+        )
+    )
+
+
+def show_table(rows: Iterable[Dict[str, Any]], columns: Optional[List[str]] = None):
+    """Render a list of dicts as a pandas DataFrame table."""
+    import pandas as pd
+
+    rows = list(rows)
+    if not rows:
+        display(Markdown("_No data to display._"))
+        return None
+    df = pd.DataFrame(rows)
+    if columns:
+        df = df[[c for c in columns if c in df.columns]]
+    display(df)
+    return df
+
+
+def mask_key_in_url(url: str, key: str) -> str:
+    """Return `url` with any occurrence of the secret `key` masked out."""
+    if not key:
+        return url
+    return url.replace(key, "***MASKED***")
+
+
+def plot_remaining_tokens(requests_log: List[Dict[str, Any]], trip_index: Optional[int] = None):
+    """Plot remaining-tokens-per-minute across a sequence of requests."""
+    import matplotlib.pyplot as plt
+
+    xs = [r.get("request_number") for r in requests_log]
+    ys = [r.get("remaining_tokens") for r in requests_log]
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.plot(xs, ys, marker="o", label="remaining-tokens")
+    if trip_index is not None:
+        ax.axvline(trip_index, color="red", linestyle="--", label="429 tripped")
+    ax.set_xlabel("Request #")
+    ax.set_ylabel("Remaining tokens (TPM window)")
+    ax.set_title("Remaining tokens per request")
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+    return fig

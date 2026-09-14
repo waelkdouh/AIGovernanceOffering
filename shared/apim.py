@@ -8,6 +8,7 @@ workshop demos, not just Demo 1.
 
 from __future__ import annotations
 
+import json as _json
 import time
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +73,19 @@ def _request(
     return response
 
 
+def _json_body(response: requests.Response) -> Dict[str, Any]:
+    """Parse an ARM response body, tolerating a UTF-8 BOM and empty payloads."""
+    if not response.content:
+        return {}
+    text = response.text.lstrip("\ufeff")
+    if not text.strip():
+        return {}
+    try:
+        return _json.loads(text)
+    except ValueError:
+        return {}
+
+
 def _wait_for_completion(response: requests.Response) -> None:
     """Poll an ARM async operation (202 Accepted) until it finishes."""
     if response.status_code != 202:
@@ -83,11 +97,7 @@ def _wait_for_completion(response: requests.Response) -> None:
     while time.time() < deadline:
         poll = requests.get(location, headers=_headers(), timeout=60)
         if poll.status_code in (200, 201, 204):
-            body = {}
-            try:
-                body = poll.json()
-            except ValueError:
-                pass
+            body = _json_body(poll)
             status = (body or {}).get("status")
             if status in (None, "Succeeded"):
                 return
@@ -121,7 +131,7 @@ def ensure_api(
         body["properties"]["serviceUrl"] = service_url
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def ensure_operation(
@@ -148,7 +158,7 @@ def ensure_operation(
     }
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def ensure_backend(
@@ -172,7 +182,7 @@ def ensure_backend(
     }
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def ensure_named_value(
@@ -198,7 +208,7 @@ def ensure_named_value(
     }
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def ensure_product(
@@ -223,7 +233,7 @@ def ensure_product(
     }
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def ensure_product_api_link(
@@ -277,7 +287,7 @@ def ensure_subscription(
     }
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def set_api_policy(
@@ -295,15 +305,20 @@ def set_api_policy(
     body = {"properties": {"format": "xml", "value": policy_xml}}
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
-    return response.json() if response.content else {}
+    return _json_body(response)
 
 
 def get_gateway_url(subscription_id: str, resource_group: str, apim_name: str) -> str:
     """Look up the APIM instance's public gateway URL."""
     url = _service_scope(subscription_id, resource_group, apim_name)
     response = _request("GET", url)
-    data = response.json()
-    return data["properties"]["gatewayUrl"]
+    data = _json_body(response)
+    try:
+        return data["properties"]["gatewayUrl"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError(
+            f"GET {response.url} returned no APIM gateway URL"
+        ) from exc
 
 
 def get_subscription_key(
@@ -318,8 +333,13 @@ def get_subscription_key(
         f"/subscriptions/{apim_subscription_id}/listSecrets"
     )
     response = _request("POST", url, ok_statuses=[200])
-    data = response.json()
-    return data["primaryKey"]
+    data = _json_body(response)
+    try:
+        return data["primaryKey"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError(
+            f"POST {response.url} returned no primary subscription key"
+        ) from exc
 
 
 def delete_api_if_exists(
@@ -388,4 +408,7 @@ def get_service(subscription_id: str, resource_group: str, apim_name: str) -> Di
     response = _request("GET", url)
     if response.status_code == 404:
         raise ApimError("GET", response.url, response)
-    return response.json()
+    data = _json_body(response)
+    if not data:
+        raise RuntimeError(f"GET {response.url} returned an empty or invalid JSON body")
+    return data

@@ -194,7 +194,20 @@ def ensure_named_value(
     value: str,
     secret: bool = True,
 ) -> Dict[str, Any]:
-    """Create or update (idempotent) a named value (e.g. the AOAI key)."""
+    """Create or update (idempotent) a named value (e.g. the AOAI key).
+
+    Convention: the named value id and display name must be identical and
+    lowercase, matching the ``{{token}}`` used in the policy XML. APIM resolves
+    policy ``{{...}}`` references against the named value *display name*, and
+    the lookup is case-sensitive -- a mismatch surfaces later as an opaque
+    policy validation error (HTTP 400, "Cannot find a property '<token>'").
+    """
+    if display_name != named_value_id:
+        raise ValueError(
+            f"Named value display_name {display_name!r} must match id "
+            f"{named_value_id!r}; policy '{{{{...}}}}' lookups are by display "
+            "name and are case-sensitive."
+        )
     url = (
         f"{_service_scope(subscription_id, resource_group, apim_name)}"
         f"/namedValues/{named_value_id}"

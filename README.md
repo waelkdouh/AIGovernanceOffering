@@ -93,6 +93,19 @@ notebooks/
   demo4-placeholder.ipynb        # stub
 ```
 
+## Named value convention
+
+APIM resolves `{{token}}` references in policy XML against a named value's
+**display name**, and the match is case-sensitive. To avoid mismatches, this
+repo requires the named value **id and display name to be identical,
+lowercase, and equal to the `{{token}}` used in the policy XML** (for example
+`demo1-tokens-per-minute`). `shared/apim.ensure_named_value` raises a
+`ValueError` if the id and display name differ.
+
+Named values interpolated into `condition` / `set-body` expressions must also
+be created with `secret=False`; secret named values cannot be interpolated
+there.
+
 ## Demo 1: Token limits & quota enforcement
 
 Demo 1 shows a complete, idempotent, end-to-end flow:

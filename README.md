@@ -26,13 +26,19 @@ policies, and then demonstrate the resulting behavior live.
 
 ### APIM SKU requirements
 
-Demo 1 relies on the **`azure-openai-token-limit`** policy, which requires a
-supported APIM tier. Classic **Standard**/**Premium** tiers and the newer
-**StandardV2**/**PremiumV2** tiers support it; the **Consumption** and
-**Developer** tiers may not, depending on current Azure documentation.
-Confirm your APIM SKU supports `azure-openai-token-limit` before running
-Demo 1 -- `00-setup-and-validation.ipynb` will print your instance's SKU as
-part of its checks.
+Demo 1 relies on the provider-agnostic **`llm-token-limit`** policy. It is
+supported on **Developer**, **Basic**, **Basic v2**, **Standard**,
+**Standard v2**, **Premium**, and **Premium v2** tiers, but not on
+**Consumption**. Confirm your APIM SKU supports `llm-token-limit` before
+running Demo 1 -- `00-setup-and-validation.ipynb` will print your instance's
+SKU as part of its checks.
+
+`llm-token-limit` is preferred over the Azure OpenAI-specific predecessor,
+`azure-openai-token-limit`, because it supports Foundry models,
+OpenAI-compatible APIs, Anthropic, and Vertex AI. It provides both TPM rate
+limiting and long-term quotas through `token-quota` and
+`token-quota-period`, returning 429 for TPM bursts and 403 for quota
+exhaustion. It is also the focus of Microsoft's AI Gateway investment.
 
 ## Getting started
 
@@ -113,10 +119,10 @@ Demo 1 shows a complete, idempotent, end-to-end flow:
 1. Creates a dedicated APIM subscription and product for isolation, plus the
    Azure OpenAI-backed API, backend, named values, and operation -- all
    before any calls are made.
-2. Applies a policy at **API scope** combining `azure-openai-token-limit`
-   (tokens-per-minute) with a daily token-quota dimension.
-3. Makes a baseline call and reads the `tokens-consumed` /
-   `remaining-tokens` headers.
+2. Applies a policy at **API scope** using `llm-token-limit` for both the
+   tokens-per-minute limit and the native daily `token-quota`.
+3. Makes a baseline call and reads the `tokens-consumed`, `remaining-tokens`,
+   and `remaining-quota-tokens` headers.
 4. Bursts requests until a `429` with `Retry-After` is observed.
 5. Continues (respecting `Retry-After`) until the daily token budget is
    exhausted and a `403` is returned.

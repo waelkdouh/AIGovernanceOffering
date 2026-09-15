@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv, set_key
 
@@ -23,6 +24,14 @@ ENV_PATH = REPO_ROOT / ".env"
 # Fields that should never be echoed back in plain text.
 SECRET_FIELDS = {"aoai_key"}
 
+# Supported Azure OpenAI request surfaces:
+#   "v1"      -> Microsoft Foundry / v1 surface: POST /openai/v1/chat/completions
+#                with the deployment passed in the body as "model" and no
+#                api-version query parameter.
+#   "classic" -> Azure OpenAI surface: POST /openai/deployments/{deployment}
+#                /chat/completions?api-version=...
+API_STYLES = ("v1", "classic")
+
 
 @dataclass
 class WorkshopConfig:
@@ -32,7 +41,8 @@ class WorkshopConfig:
     aoai_endpoint: str = ""
     aoai_deployment: str = ""
     aoai_key: Optional[str] = None
-    aoai_api_version: str = "2024-02-15-preview"
+    aoai_api_version: str = "2024-10-21"
+    aoai_api_style: str = "v1"
     demo_run: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     def as_display_dict(self) -> Dict[str, str]:
@@ -51,6 +61,7 @@ _ENV_KEYS = {
     "aoai_deployment": "AOAI_DEPLOYMENT",
     "aoai_key": "AOAI_KEY",
     "aoai_api_version": "AOAI_API_VERSION",
+    "aoai_api_style": "AOAI_API_STYLE",
     "demo_run": "DEMO_RUN",
 }
 
@@ -93,6 +104,9 @@ def load_config(interactive: bool = True) -> WorkshopConfig:
     cfg.aoai_deployment = os.environ.get("AOAI_DEPLOYMENT", "")
     cfg.aoai_key = os.environ.get("AOAI_KEY") or None
     cfg.aoai_api_version = os.environ.get("AOAI_API_VERSION", cfg.aoai_api_version)
+    cfg.aoai_api_style = (
+        os.environ.get("AOAI_API_STYLE", "").strip().lower() or cfg.aoai_api_style
+    )
     cfg.demo_run = os.environ.get("DEMO_RUN", "") or cfg.demo_run
 
     if not interactive:
@@ -126,6 +140,18 @@ def load_config(interactive: bool = True) -> WorkshopConfig:
         )
         cfg.aoai_key = answer or None
         _persist("aoai_key", cfg.aoai_key or "")
+
+    if "AOAI_API_STYLE" not in _dotenv_keys():
+        answer = _prompt(
+            "aoai_api_style",
+            "Azure OpenAI API style -- 'v1' for Microsoft Foundry "
+            "(/openai/v1/chat/completions) or 'classic' for Azure OpenAI "
+            "(/openai/deployments/...)",
+            default=cfg.aoai_api_style,
+        )
+        answer = answer.strip().lower()
+        cfg.aoai_api_style = answer if answer in API_STYLES else cfg.aoai_api_style
+        _persist("aoai_api_style", cfg.aoai_api_style)
 
     if cfg.subscription_id:
         _persist("subscription_id", cfg.subscription_id)
@@ -165,3 +191,19 @@ def validate_config(cfg: WorkshopConfig) -> None:
     ]
     if missing:
         raise ValueError(f"Missing required configuration values: {', '.join(missing)}")
+
+    if cfg.aoai_api_style not in API_STYLES:
+        raise ValueError(
+            f"AOAI_API_STYLE must be one of {', '.join(API_STYLES)} "
+            f"(got '{cfg.aoai_api_style}')."
+        )
+
+    parsed = urlparse(cfg.aoai_endpoint)
+    if parsed.path not in ("", "/"):
+        raise ValueError(
+            "AOAI_ENDPOINT must be the resource root (e.g. "
+            "https://<name>.services.ai.azure.com or https://<name>.openai.azure.com) "
+            f"without a path -- got '{cfg.aoai_endpoint}'. Remove the "
+            f"'{parsed.path}' path segment; the notebooks append the correct "
+            "request path themselves."
+        )

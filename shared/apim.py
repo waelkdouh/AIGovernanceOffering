@@ -74,17 +74,17 @@ def _request(
     ok_statuses = ok_statuses or [200, 201, 202, 204]
     if response.status_code == 404 and method == "GET":
         return response
-
-
-def _resource_name(resource_id: str) -> str:
-        return resource_id.rstrip("/").split("/")[-1]
-
-
-def _portal_url(resource_id: str, blade: str = "overview") -> str:
-        return f"https://portal.azure.com/#@/resource{resource_id}/{blade}"
     if response.status_code not in ok_statuses:
         raise ApimError(method, response.url, response)
     return response
+
+
+def _resource_name(resource_id: str) -> str:
+    return resource_id.rstrip("/").split("/")[-1]
+
+
+def _portal_url(resource_id: str, blade: str = "overview") -> str:
+    return f"https://portal.azure.com/#@/resource{resource_id}/{blade}"
 
 
 def _json_body(response: requests.Response) -> Dict[str, Any]:

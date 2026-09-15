@@ -23,88 +23,22 @@
       x-demo-run header sent by the notebook) instantly resets every counter
       below, with no need to wait for the TPM window or the daily window to roll.
     -->
-    <azure-openai-token-limit
+    <llm-token-limit
         counter-key='@(context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
         tokens-per-minute="{{demo1-tokens-per-minute}}"
+        token-quota="{{demo1-daily-token-cap}}"
+        token-quota-period="Daily"
         estimate-prompt-tokens="false"
         retry-after-header-name="Retry-After"
         tokens-consumed-header-name="tokens-consumed"
-        remaining-tokens-header-name="remaining-tokens" />
-
-    <!--
-      Daily quota dimension: a separate counter (same demo-isolated key, but a
-      distinct cache-key suffix and a 24h window) tracks cumulative tokens
-      consumed for the day. Once the configured daily cap is exceeded we
-      short-circuit the request with a 403 and a clear explanation, instead of
-      relying on azure-openai-token-limit's own quota (which returns 429).
-    -->
-    <cache-lookup-value
-        key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
-        variable-name="demo1DailyTokensUsed"
-        default-value="0"
-        caching-type="internal" />
-    <choose>
-      <when condition='@(Convert.ToInt32(context.Variables["demo1DailyTokensUsed"]) >= {{demo1-daily-token-cap}})'>
-        <return-response>
-          <set-status code="403" reason="Daily token budget exhausted" />
-          <set-header name="Content-Type" exists-action="override">
-            <value>application/json</value>
-          </set-header>
-          <set-body>@{
-            var used = Convert.ToInt32(context.Variables["demo1DailyTokensUsed"]);
-            return new JObject(
-              new JProperty("error", "daily_token_budget_exhausted"),
-              new JProperty("message", "This demo's daily token budget has been exhausted. Change the x-demo-run header (DEMO_RUN) to reset instantly, or wait for the daily window to roll over."),
-              new JProperty("dailyTokenCap", {{demo1-daily-token-cap}}),
-              new JProperty("tokensUsedToday", used)
-            ).ToString();
-          }</set-body>
-        </return-response>
-      </when>
-    </choose>
+        remaining-tokens-header-name="remaining-tokens"
+        remaining-quota-tokens-header-name="remaining-quota-tokens" />
   </inbound>
   <backend>
     <base />
   </backend>
   <outbound>
     <base />
-    <!--
-      After a successful call, add this request's consumed tokens to the daily
-      counter, with a 24h sliding expiration. The token count is read from the
-      Azure OpenAI response body (usage.total_tokens) rather than from the
-      'tokens-consumed' response header: that header is emitted by
-      azure-openai-token-limit at the very end of the pipeline, after this
-      block runs, so reading it here would always yield 0 and the daily counter
-      would never grow. Reading the body requires preserveContent: true so the
-      client still receives the complete response. The running server-side
-      total is echoed back as x-demo1-daily-tokens-used so the notebook can
-      watch the counter climb toward the cap.
-    -->
-    <choose>
-      <when condition="@(context.Response.StatusCode == 200)">
-        <set-variable name="demo1TokensConsumedThisCall" value='@{
-            try {
-                var body = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
-                var usage = body["usage"];
-                if (usage == null) { return 0; }
-                return (int)usage["total_tokens"];
-            } catch (Exception) { return 0; }
-        }' />
-        <cache-lookup-value
-            key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
-            variable-name="demo1DailyTokensUsedOutbound"
-            default-value="0"
-            caching-type="internal" />
-        <cache-store-value
-            key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
-            value='@((Convert.ToInt32(context.Variables["demo1DailyTokensUsedOutbound"]) + Convert.ToInt32(context.Variables["demo1TokensConsumedThisCall"])).ToString())'
-            duration="86400"
-            caching-type="internal" />
-        <set-header name="x-demo1-daily-tokens-used" exists-action="override">
-          <value>@((Convert.ToInt32(context.Variables["demo1DailyTokensUsedOutbound"]) + Convert.ToInt32(context.Variables["demo1TokensConsumedThisCall"])).ToString())</value>
-        </set-header>
-      </when>
-    </choose>
   </outbound>
   <on-error>
     <base />

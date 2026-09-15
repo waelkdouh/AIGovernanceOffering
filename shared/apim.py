@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json as _json
 import time
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
@@ -18,6 +19,7 @@ from .auth import get_arm_token
 
 ARM_BASE = "https://management.azure.com"
 API_VERSION = "2022-08-01"
+APIM_PREVIEW_API_VERSION = "2025-09-01-preview"
 
 # How long to wait for APIM's async provisioning (e.g. a service that is
 # still "Updating") before giving up.
@@ -53,6 +55,10 @@ def _service_scope(subscription_id: str, resource_group: str, apim_name: str) ->
     )
 
 
+def _resource_group_scope(subscription_id: str, resource_group: str) -> str:
+    return f"{ARM_BASE}/subscriptions/{subscription_id}/resourceGroups/{resource_group}"
+
+
 def _request(
     method: str,
     url: str,
@@ -68,6 +74,14 @@ def _request(
     ok_statuses = ok_statuses or [200, 201, 202, 204]
     if response.status_code == 404 and method == "GET":
         return response
+
+
+def _resource_name(resource_id: str) -> str:
+        return resource_id.rstrip("/").split("/")[-1]
+
+
+def _portal_url(resource_id: str, blade: str = "overview") -> str:
+        return f"https://portal.azure.com/#@/resource{resource_id}/{blade}"
     if response.status_code not in ok_statuses:
         raise ApimError(method, response.url, response)
     return response
@@ -309,6 +323,347 @@ def ensure_subscription(
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
     return _json_body(response)
+
+
+def list_loggers(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+) -> List[Dict[str, Any]]:
+    """List APIM loggers configured on the service."""
+    url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers"
+    response = _request("GET", url)
+    return _json_body(response).get("value", [])
+
+
+def get_logger(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    logger_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Fetch an APIM logger, returning None if it does not exist."""
+    url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
+    response = _request("GET", url)
+    if response.status_code == 404:
+        return None
+    return _json_body(response)
+
+
+def ensure_logger(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    logger_id: str,
+    app_insights_resource_id: Optional[str] = None,
+    app_insights_connection_string: Optional[str] = None,
+    description: str = "",
+) -> Dict[str, Any]:
+    """Create or update an APIM Application Insights logger.
+
+    Provide either an Application Insights resource id, a connection string, or
+    both. APIM accepts the connection string in the logger credentials and the
+    resource id as the Azure resource backing the logger.
+    """
+    if not (app_insights_resource_id or app_insights_connection_string):
+        raise ValueError(
+            "ensure_logger requires app_insights_resource_id, "
+            "app_insights_connection_string, or both."
+        )
+
+    url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
+    properties: Dict[str, Any] = {
+        "loggerType": "applicationInsights",
+        "description": description or logger_id,
+        "isBuffered": True,
+    }
+    if app_insights_resource_id:
+        properties["resourceId"] = app_insights_resource_id
+    if app_insights_connection_string:
+        properties["credentials"] = {"connectionString": app_insights_connection_string}
+
+    response = _request("PUT", url, json_body={"properties": properties})
+    _wait_for_completion(response)
+    return _json_body(response)
+
+
+def get_app_insights_for_apim(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+) -> Optional[Dict[str, Any]]:
+    """Return the first APIM Application Insights logger found, if any."""
+    for logger in list_loggers(subscription_id, resource_group, apim_name):
+        props = logger.get("properties", {})
+        if props.get("loggerType") == "applicationInsights":
+            return {
+                "logger_id": _resource_name(logger.get("name", "") or logger.get("id", "")),
+                "logger_resource_id": logger.get("id"),
+                "app_insights_resource_id": props.get("resourceId"),
+                "description": props.get("description", ""),
+            }
+    return None
+
+
+def ensure_api_diagnostic(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    api_id: str,
+    logger_id: str,
+) -> Dict[str, Any]:
+    """Enable API-scope Application Insights diagnostics with LLM logging."""
+    diagnostic_id = "applicationinsights"
+    logger_resource_id = (
+        f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
+    )
+    url = (
+        f"{_service_scope(subscription_id, resource_group, apim_name)}"
+        f"/apis/{api_id}/diagnostics/{diagnostic_id}"
+    )
+    body = {
+        "properties": {
+            "alwaysLog": "allErrors",
+            "loggerId": logger_resource_id,
+            "sampling": {"samplingType": "fixed", "percentage": 100},
+            "frontend": {"request": {"headers": []}, "response": {"headers": []}},
+            "backend": {"request": {"headers": []}, "response": {"headers": []}},
+            "largeLanguageModel": {
+                "logs": "all",
+                "requests": {"messages": "all", "maxSizeInBytes": 8192},
+                "responses": {"messages": "all", "maxSizeInBytes": 8192},
+            },
+        }
+    }
+    response = _request(
+        "PUT",
+        url,
+        params={"api-version": APIM_PREVIEW_API_VERSION},
+        json_body=body,
+    )
+    _wait_for_completion(response)
+    return _json_body(response)
+
+
+def get_api_diagnostic(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    api_id: str,
+    diagnostic_id: str = "applicationinsights",
+) -> Optional[Dict[str, Any]]:
+    """Fetch an API diagnostic, returning None if it does not exist."""
+    url = (
+        f"{_service_scope(subscription_id, resource_group, apim_name)}"
+        f"/apis/{api_id}/diagnostics/{diagnostic_id}"
+    )
+    response = _request(
+        "GET",
+        url,
+        params={"api-version": APIM_PREVIEW_API_VERSION},
+    )
+    if response.status_code == 404:
+        return None
+    return _json_body(response)
+
+
+def app_insights_resource_id(
+    subscription_id: str,
+    resource_group: str,
+    app_insights_name: str,
+) -> str:
+    """Build an Application Insights component resource id."""
+    return (
+        f"{_resource_group_scope(subscription_id, resource_group)}"
+        f"/providers/Microsoft.Insights/components/{app_insights_name}"
+    )
+
+
+def check_custom_metric_dimensions_enabled(
+    app_insights_resource_id: Optional[str],
+) -> Dict[str, Any]:
+    """Best-effort check for App Insights custom metric dimensions support.
+
+    ARM does not expose this portal setting consistently across environments.
+    When the setting cannot be detected, callers should show the returned
+    manual remediation text instead of treating the check as silently passed.
+    """
+    if not app_insights_resource_id:
+        return {
+            "status": "MANUAL",
+            "detail": "No Application Insights resource id is known.",
+            "remediation": (
+                "Open the Application Insights resource in the Azure portal, "
+                "go to Usage and estimated costs, and enable 'Alerting on "
+                "custom metric dimensions'."
+            ),
+            "portal_url": "https://portal.azure.com/",
+        }
+
+    url = f"{ARM_BASE}{app_insights_resource_id}/currentbillingfeatures"
+    try:
+        response = _request(
+            "GET",
+            url,
+            params={"api-version": "2015-05-01"},
+            ok_statuses=[200, 404],
+        )
+    except Exception as exc:
+        return {
+            "status": "MANUAL",
+            "detail": f"ARM check was not available: {exc}",
+            "remediation": (
+                "Open the Application Insights resource in the Azure portal, "
+                "go to Usage and estimated costs, and enable 'Alerting on "
+                "custom metric dimensions'."
+            ),
+            "portal_url": _portal_url(app_insights_resource_id, "usageAndEstimatedCosts"),
+        }
+
+    if response.status_code == 404:
+        return {
+            "status": "MANUAL",
+            "detail": "This App Insights setting was not exposed by ARM.",
+            "remediation": (
+                "Open the Application Insights resource in the Azure portal, "
+                "go to Usage and estimated costs, and enable 'Alerting on "
+                "custom metric dimensions'."
+            ),
+            "portal_url": _portal_url(app_insights_resource_id, "usageAndEstimatedCosts"),
+        }
+
+    data = _json_body(response)
+    features = data.get("currentBillingFeatures") or data.get("properties", {}).get(
+        "currentBillingFeatures", []
+    )
+    enabled = any(
+        str(feature).lower() in {"metricdimensions", "custommetricdimensions"}
+        for feature in features
+    )
+    return {
+        "status": "PASS" if enabled else "MANUAL",
+        "detail": (
+            "ARM reported custom metric dimensions support."
+            if enabled
+            else "ARM response did not explicitly confirm the portal setting."
+        ),
+        "remediation": (
+            "No action needed."
+            if enabled
+            else "In the Application Insights portal, go to Usage and estimated "
+            "costs and enable 'Alerting on custom metric dimensions'."
+        ),
+        "portal_url": _portal_url(app_insights_resource_id, "usageAndEstimatedCosts"),
+    }
+
+
+def query_token_metrics(
+    resource_id: str,
+    metric_names: Iterable[str],
+    namespace: str = "module8",
+    dimension_name: str = "ClientApp",
+    subscription_filter: Optional[str] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+    interval_minutes: int = 5,
+) -> List[Dict[str, Any]]:
+    """Query Azure Monitor metrics for APIM token metrics split by a dimension."""
+    from azure.monitor.query import MetricAggregationType, MetricsQueryClient
+
+    from .auth import get_credential
+
+    end_time = end_time or datetime.now(timezone.utc)
+    start_time = start_time or (end_time - timedelta(minutes=30))
+
+    filters = [f"{dimension_name} eq '*'"]
+    if subscription_filter:
+        filters.append(f"Subscription ID eq '{subscription_filter}'")
+    metric_filter = " and ".join(filters)
+
+    client = MetricsQueryClient(get_credential())
+    result = client.query_resource(
+        resource_id,
+        metric_names=list(metric_names),
+        metric_namespace=namespace,
+        timespan=(start_time, end_time),
+        granularity=timedelta(minutes=interval_minutes),
+        aggregations=[MetricAggregationType.TOTAL],
+        filter=metric_filter,
+    )
+
+    rows: List[Dict[str, Any]] = []
+    for metric in result.metrics:
+        for timeseries in metric.timeseries:
+            metadata = {
+                item.name.value if hasattr(item.name, "value") else item.name: item.value
+                for item in timeseries.metadata_values
+            }
+            dimension_value = metadata.get(dimension_name, "unknown")
+            for point in timeseries.data:
+                total = getattr(point, "total", None)
+                if total is None:
+                    continue
+                rows.append(
+                    {
+                        "timestamp": point.timestamp,
+                        "metric_name": metric.name,
+                        "dimension_name": dimension_name,
+                        "dimension_value": dimension_value,
+                        "total": total,
+                    }
+                )
+    return rows
+
+
+def query_app_insights_token_metrics(
+    app_insights_resource_id: str,
+    metric_names: Iterable[str],
+    dimension_name: str = "ClientApp",
+    subscription_filter: Optional[str] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+) -> List[Dict[str, Any]]:
+    """Fallback Kusto query against Application Insights customMetrics."""
+    from azure.monitor.query import LogsQueryClient
+
+    from .auth import get_credential
+
+    end_time = end_time or datetime.now(timezone.utc)
+    start_time = start_time or (end_time - timedelta(minutes=30))
+    metric_names_literal = ", ".join(repr(name) for name in metric_names)
+    subscription_predicate = ""
+    if subscription_filter:
+        subscription_predicate = (
+            f"| where tostring(customDimensions['Subscription ID']) == '{subscription_filter}'"
+        )
+    query = f"""
+customMetrics
+| where timestamp between (datetime({start_time.isoformat()}) .. datetime({end_time.isoformat()}))
+| where name in ({metric_names_literal})
+{subscription_predicate}
+| extend dimension_value = tostring(customDimensions['{dimension_name}'])
+| summarize total=sum(value) by bin(timestamp, 5m), metric_name=name, dimension_value
+| order by timestamp asc
+"""
+    response = LogsQueryClient(get_credential()).query_resource(
+        app_insights_resource_id,
+        query,
+        timespan=(start_time, end_time),
+    )
+    if not response.tables:
+        return []
+    table = response.tables[0]
+    columns = [column.name for column in table.columns]
+    return [
+        {
+            "timestamp": row[columns.index("timestamp")],
+            "metric_name": row[columns.index("metric_name")],
+            "dimension_name": dimension_name,
+            "dimension_value": row[columns.index("dimension_value")] or "unknown",
+            "total": row[columns.index("total")],
+        }
+        for row in table.rows
+    ]
 
 
 def set_api_policy(

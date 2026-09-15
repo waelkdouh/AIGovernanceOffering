@@ -1,0 +1,34 @@
+<policies>
+  <inbound>
+    <base />
+    <set-backend-service backend-id="demo2-openai-backend" />
+    <!--
+      Backend authentication: the Azure OpenAI / Microsoft Foundry resource has
+      key authentication disabled, so APIM authenticates with its managed
+      identity and forwards the resulting bearer token to the backend. Grant
+      the APIM identity the 'Cognitive Services OpenAI User' role on the AI
+      resource. (If an API key is supplied instead, the notebook swaps this
+      block for an 'api-key' header sourced from the demo2-aoai-key named
+      value.)
+    -->
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com"
+        output-token-variable-name="aoai-token" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["aoai-token"])</value>
+    </set-header>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <llm-emit-token-metric namespace="module8">
+      <dimension name="API ID" />
+      <dimension name="Subscription ID" />
+      <dimension name="ClientApp" value="@(context.Request.Headers.GetValueOrDefault(&quot;x-client-app&quot;,&quot;unknown&quot;))" />
+    </llm-emit-token-metric>
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

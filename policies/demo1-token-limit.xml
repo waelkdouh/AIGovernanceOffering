@@ -41,7 +41,8 @@
     <cache-lookup-value
         key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
         variable-name="demo1DailyTokensUsed"
-        default-value="0" />
+        default-value="0"
+        caching-type="internal" />
     <choose>
       <when condition='@(Convert.ToInt32(context.Variables["demo1DailyTokensUsed"]) >= {{demo1-daily-token-cap}})'>
         <return-response>
@@ -68,26 +69,40 @@
   <outbound>
     <base />
     <!--
-      After a successful call, add this request's consumed tokens (reported by
-      azure-openai-token-limit via the response header) to the daily counter,
-      with a 24h sliding expiration.
+      After a successful call, add this request's consumed tokens to the daily
+      counter, with a 24h sliding expiration. The token count is read from the
+      Azure OpenAI response body (usage.total_tokens) rather than from the
+      'tokens-consumed' response header: that header is emitted by
+      azure-openai-token-limit at the very end of the pipeline, after this
+      block runs, so reading it here would always yield 0 and the daily counter
+      would never grow. Reading the body requires preserveContent: true so the
+      client still receives the complete response. The running server-side
+      total is echoed back as x-demo1-daily-tokens-used so the notebook can
+      watch the counter climb toward the cap.
     -->
     <choose>
       <when condition="@(context.Response.StatusCode == 200)">
-        <set-variable name="demo1TokensConsumedThisCall"
-            value='@{
-                var header = context.Response.Headers.GetValueOrDefault("tokens-consumed", "0");
-                int parsed;
-                return int.TryParse(header, out parsed) ? parsed : 0;
-            }' />
+        <set-variable name="demo1TokensConsumedThisCall" value='@{
+            try {
+                var body = context.Response.Body.As&lt;JObject&gt;(preserveContent: true);
+                var usage = body["usage"];
+                if (usage == null) { return 0; }
+                return (int)usage["total_tokens"];
+            } catch (Exception) { return 0; }
+        }' />
         <cache-lookup-value
             key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
             variable-name="demo1DailyTokensUsedOutbound"
-            default-value="0" />
+            default-value="0"
+            caching-type="internal" />
         <cache-store-value
             key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
             value='@((Convert.ToInt32(context.Variables["demo1DailyTokensUsedOutbound"]) + Convert.ToInt32(context.Variables["demo1TokensConsumedThisCall"])).ToString())'
-            duration="86400" />
+            duration="86400"
+            caching-type="internal" />
+        <set-header name="x-demo1-daily-tokens-used" exists-action="override">
+          <value>@((Convert.ToInt32(context.Variables["demo1DailyTokensUsedOutbound"]) + Convert.ToInt32(context.Variables["demo1TokensConsumedThisCall"])).ToString())</value>
+        </set-header>
       </when>
     </choose>
   </outbound>

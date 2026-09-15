@@ -2,6 +2,21 @@
   <inbound>
     <base />
     <!--
+      Backend authentication: the Azure OpenAI / Microsoft Foundry resource has
+      key authentication disabled, so APIM authenticates with its managed
+      identity and forwards the resulting bearer token to the backend. Grant
+      the APIM identity the 'Cognitive Services OpenAI User' role on the AI
+      resource. (If an API key is supplied instead, the notebook swaps this
+      block for an 'api-key' header sourced from the demo1-aoai-key named
+      value.)
+    -->
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com"
+        output-token-variable-name="aoai-token" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["aoai-token"])</value>
+    </set-header>
+
+    <!--
       Demo isolation: the counter-key combines the caller's APIM subscription id
       with the x-demo-run header value. Changing DEMO_RUN (and therefore the
       x-demo-run header sent by the notebook) instantly resets every counter

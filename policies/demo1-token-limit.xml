@@ -43,14 +43,14 @@
         variable-name="demo1DailyTokensUsed"
         default-value="0" />
     <choose>
-      <when condition='@(int.Parse((string)context.Variables["demo1DailyTokensUsed"]) >= {{demo1-daily-token-cap}})'>
+      <when condition='@(Convert.ToInt32(context.Variables["demo1DailyTokensUsed"]) >= {{demo1-daily-token-cap}})'>
         <return-response>
           <set-status code="403" reason="Daily token budget exhausted" />
           <set-header name="Content-Type" exists-action="override">
             <value>application/json</value>
           </set-header>
           <set-body>@{
-            var used = (string)context.Variables["demo1DailyTokensUsed"];
+            var used = Convert.ToInt32(context.Variables["demo1DailyTokensUsed"]);
             return new JObject(
               new JProperty("error", "daily_token_budget_exhausted"),
               new JProperty("message", "This demo's daily token budget has been exhausted. Change the x-demo-run header (DEMO_RUN) to reset instantly, or wait for the daily window to roll over."),
@@ -72,20 +72,24 @@
       azure-openai-token-limit via the response header) to the daily counter,
       with a 24h sliding expiration.
     -->
-    <set-variable name="demo1TokensConsumedThisCall"
-        value='@{
-            var header = context.Response.Headers.GetValueOrDefault("tokens-consumed", "0");
-            int parsed;
-            return int.TryParse(header, out parsed) ? parsed : 0;
-        }' />
-    <cache-lookup-value
-        key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
-        variable-name="demo1DailyTokensUsedOutbound"
-        default-value="0" />
-    <cache-store-value
-        key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
-        value='@(int.Parse((string)context.Variables["demo1DailyTokensUsedOutbound"]) + (int)context.Variables["demo1TokensConsumedThisCall"])'
-        duration="86400" />
+    <choose>
+      <when condition="@(context.Response.StatusCode == 200)">
+        <set-variable name="demo1TokensConsumedThisCall"
+            value='@{
+                var header = context.Response.Headers.GetValueOrDefault("tokens-consumed", "0");
+                int parsed;
+                return int.TryParse(header, out parsed) ? parsed : 0;
+            }' />
+        <cache-lookup-value
+            key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
+            variable-name="demo1DailyTokensUsedOutbound"
+            default-value="0" />
+        <cache-store-value
+            key='@("demo1-daily-" + context.Subscription.Id + "-" + context.Request.Headers.GetValueOrDefault("x-demo-run","default"))'
+            value='@((Convert.ToInt32(context.Variables["demo1DailyTokensUsedOutbound"]) + Convert.ToInt32(context.Variables["demo1TokensConsumedThisCall"])).ToString())'
+            duration="86400" />
+      </when>
+    </choose>
   </outbound>
   <on-error>
     <base />

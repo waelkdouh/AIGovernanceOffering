@@ -334,13 +334,20 @@ def get_api_policy(
     resource_group: str,
     apim_name: str,
     api_id: str,
+    policy_format: str = "rawxml",
 ) -> Dict[str, Any]:
-    """Fetch the XML policy document applied at API scope."""
+    """Fetch the XML policy document applied at API scope.
+
+    APIM defaults to ``format=xaml``, which returns the policy with attribute
+    quotes and expressions XML-escaped (e.g. ``backend-id=&quot;...&quot;``).
+    Request ``rawxml`` so callers can match directives such as
+    ``set-backend-service`` literally instead of against escaped XML.
+    """
     url = (
         f"{_service_scope(subscription_id, resource_group, apim_name)}"
         f"/apis/{api_id}/policies/policy"
     )
-    response = _request("GET", url)
+    response = _request("GET", url, params={"format": policy_format})
     if response.status_code == 404:
         raise ApimError("GET", response.url, response)
     return _json_body(response)

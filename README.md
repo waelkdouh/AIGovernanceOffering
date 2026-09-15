@@ -122,7 +122,8 @@ Demo 1 shows a complete, idempotent, end-to-end flow:
    exhausted and a `403` is returned.
 6. Summarizes what happened, then demonstrates an **instant reset** by
    changing the `x-demo-run` suffix baked into the policy's counter key.
-7. Offers optional, idempotent cleanup.
+7. Leaves its APIM resources in place -- Demos 2-4 reuse the same APIM
+   instance, so cleanup is covered at the end of the final demo.
 
 Re-running `demo1-token-limits.ipynb` end to end, twice in a row, does not
 fail or duplicate any Azure resources.

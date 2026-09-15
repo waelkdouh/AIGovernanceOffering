@@ -170,7 +170,15 @@ def ensure_backend(
     description: str = "",
     protocol: str = "http",
 ) -> Dict[str, Any]:
-    """Create or update (idempotent) a backend pointing at the AOAI endpoint."""
+    """Create or update (idempotent) a backend pointing at the AOAI endpoint.
+
+    APIM backend ``protocol`` is the backend style enum (``"http"`` versus
+    ``"soap"``), not the transport scheme. Keep HTTPS backends as
+    ``protocol="http"``; TLS transport is selected by the ``https://`` scheme
+    in ``backend_url``. APIM's REST contract does not accept ``"https"`` here.
+    Public Azure endpoints should keep both TLS certificate validation flags
+    enabled.
+    """
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/backends/{backend_id}"
     body = {
         "properties": {
@@ -318,6 +326,23 @@ def set_api_policy(
     body = {"properties": {"format": "xml", "value": policy_xml}}
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
+    return _json_body(response)
+
+
+def get_api_policy(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    api_id: str,
+) -> Dict[str, Any]:
+    """Fetch the XML policy document applied at API scope."""
+    url = (
+        f"{_service_scope(subscription_id, resource_group, apim_name)}"
+        f"/apis/{api_id}/policies/policy"
+    )
+    response = _request("GET", url)
+    if response.status_code == 404:
+        raise ApimError("GET", response.url, response)
     return _json_body(response)
 
 

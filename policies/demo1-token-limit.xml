@@ -1,6 +1,7 @@
 <policies>
   <inbound>
     <base />
+    <set-backend-service backend-id="demo1-openai-backend" />
     <!--
       Backend authentication: the Azure OpenAI / Microsoft Foundry resource has
       key authentication disabled, so APIM authenticates with its managed

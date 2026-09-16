@@ -18,7 +18,7 @@ import requests
 from .auth import get_arm_token
 
 ARM_BASE = "https://management.azure.com"
-API_VERSION = "2022-08-01"
+API_VERSION = "2024-06-01-preview"
 APIM_PREVIEW_API_VERSION = "2025-09-01-preview"
 
 # How long to wait for APIM's async provisioning (e.g. a service that is

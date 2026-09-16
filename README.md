@@ -146,7 +146,7 @@ resources on that existing instance:
    (`demo2-openai-backend`), operation, and optional AOAI key named value.
 3. API-scope diagnostics wired to an Application Insights logger when the
    required Application Insights values are available.
-4. An API-scope policy using `llm-emit-token-metric` to publish prompt,
+4. An API-scope inbound policy using `llm-emit-token-metric` to publish prompt,
    completion, and total token metrics into the `module8` namespace, split by
    `API ID`, `Subscription ID`, and bounded `ClientApp`.
 

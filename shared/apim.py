@@ -441,7 +441,6 @@ def ensure_api_diagnostic(
         },
         None,
     ]
-    last_error = None
     for llm_settings in llm_variants:
         props = dict(base_props)
         if llm_settings:
@@ -454,15 +453,15 @@ def ensure_api_diagnostic(
                 json_body={"properties": props},
             )
         except ApimError as exc:
-            if exc.status_code == 400 and "largeLanguageModel" in (exc.body or ""):
-                last_error = exc
+            if (
+                llm_settings
+                and exc.status_code == 400
+                and "largeLanguageModel" in (exc.body or "")
+            ):
                 continue
             raise
         _wait_for_completion(response)
         return _json_body(response)
-    if last_error is not None:
-        raise last_error
-    raise RuntimeError("No API diagnostic request variant was attempted.")
 
 
 def get_api_diagnostic(

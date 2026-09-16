@@ -61,6 +61,7 @@ class AppInsightsConnectionStringTests(unittest.TestCase):
                 )
 
         self.assertIs(raised.exception.__cause__, lookup_error)
+        self.assertIn("/resource", str(raised.exception))
         self.assertIn("APP_INSIGHTS_CONNECTION_STRING", str(raised.exception))
 
     def test_uses_resolved_connection_string_for_logger_credentials(self):

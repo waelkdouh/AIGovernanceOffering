@@ -394,8 +394,12 @@ def ensure_logger(
             app_insights_connection_string = None
             connection_string_error = exc
     if not app_insights_connection_string:
+        resource_detail = (
+            f" from {app_insights_resource_id}" if app_insights_resource_id else ""
+        )
         error = ValueError(
-            "Unable to obtain an Application Insights connection string. Set "
+            "Unable to obtain an Application Insights connection string"
+            f"{resource_detail}. Set "
             "APP_INSIGHTS_CONNECTION_STRING in .env, or retrieve it with "
             "az monitor app-insights component show -g <rg> -a <name> "
             "--query connectionString -o tsv."

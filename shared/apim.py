@@ -380,8 +380,8 @@ def ensure_logger(
     """
     if not (app_insights_resource_id or app_insights_connection_string):
         raise ValueError(
-            "ensure_logger requires app_insights_resource_id, "
-            "app_insights_connection_string, or both."
+            "ensure_logger requires app_insights_connection_string or an "
+            "app_insights_resource_id from which one can be resolved."
         )
     if not app_insights_connection_string and app_insights_resource_id:
         app_insights_connection_string = get_app_insights_connection_string(

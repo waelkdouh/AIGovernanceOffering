@@ -78,3 +78,109 @@ class EnsureApiDiagnosticTests(unittest.TestCase):
                 apim.ensure_api_diagnostic("sub", "rg", "apim", "api", "logger")
 
         self.assertEqual(request.call_count, 1)
+
+
+class TokenMetricsTests(unittest.TestCase):
+    RESOURCE_ID = (
+        "/subscriptions/sub/resourceGroups/rg"
+        "/providers/Microsoft.ApiManagement/service/apim"
+    )
+
+    def setUp(self):
+        apim._METRICS_REGION_CACHE.clear()
+        self.addCleanup(apim._METRICS_REGION_CACHE.clear)
+
+    def test_region_is_derived_from_arm_location_and_cached(self):
+        response = SimpleNamespace(
+            status_code=200, content=b"{}", text='{"location": "East US"}'
+        )
+        with patch.object(apim, "_request", return_value=response) as request:
+            self.assertEqual(apim.resolve_metrics_region(self.RESOURCE_ID), "eastus")
+            self.assertEqual(apim.resolve_metrics_region(self.RESOURCE_ID), "eastus")
+
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(
+            apim.metrics_endpoint(self.RESOURCE_ID),
+            "https://eastus.metrics.monitor.azure.com",
+        )
+
+    def test_region_override_argument_and_environment_skip_arm(self):
+        with patch.object(apim, "_request", side_effect=AssertionError("no ARM call")):
+            self.assertEqual(
+                apim.resolve_metrics_region(self.RESOURCE_ID, region="West Europe"),
+                "westeurope",
+            )
+            with patch.dict(apim.os.environ, {"AZURE_METRICS_REGION": "North Europe"}):
+                self.assertEqual(
+                    apim.resolve_metrics_region(self.RESOURCE_ID), "northeurope"
+                )
+
+    def test_query_token_metrics_uses_batch_client_and_keeps_row_shape(self):
+        timestamp = object()
+        timeseries = SimpleNamespace(
+            metadata_values={"ClientApp": "claims-portal"},
+            data=[
+                SimpleNamespace(timestamp=timestamp, total=12.0),
+                SimpleNamespace(timestamp=timestamp, total=None),
+            ],
+        )
+        metric = SimpleNamespace(name="prompt_tokens", timeseries=[timeseries])
+        result = SimpleNamespace(metrics=[metric])
+        captured = {}
+
+        def query_resources(**kwargs):
+            captured.update(kwargs)
+            return [result]
+
+        def fake_client(endpoint, credential):
+            captured["endpoint"] = endpoint
+            return SimpleNamespace(query_resources=query_resources)
+
+        querymetrics = SimpleNamespace(
+            MetricsClient=fake_client,
+            MetricAggregationType=SimpleNamespace(TOTAL="Total"),
+        )
+        with (
+            patch.dict(
+                "sys.modules", {"azure.monitor.querymetrics": querymetrics}
+            ),
+            patch.object(apim, "check_metrics_dependencies"),
+            patch.object(apim, "metrics_endpoint", return_value="https://eastus.metrics.monitor.azure.com"),
+            patch("shared.auth.get_credential", return_value=object()),
+        ):
+            rows = apim.query_token_metrics(
+                resource_id=self.RESOURCE_ID,
+                metric_names=["prompt_tokens"],
+                subscription_filter="demo-sub",
+            )
+
+        self.assertEqual(captured["resource_ids"], [self.RESOURCE_ID])
+        self.assertEqual(
+            captured["filter"], "ClientApp eq '*' and Subscription ID eq 'demo-sub'"
+        )
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "timestamp": timestamp,
+                    "metric_name": "prompt_tokens",
+                    "dimension_name": "ClientApp",
+                    "dimension_value": "claims-portal",
+                    "total": 12.0,
+                }
+            ],
+        )
+
+    def test_legacy_metadata_items_still_resolve_dimension(self):
+        timeseries = SimpleNamespace(
+            metadata_values=[
+                SimpleNamespace(name=SimpleNamespace(value="ClientApp"), value="analyst-copilot")
+            ]
+        )
+        self.assertEqual(
+            apim._metadata_dimension_value(timeseries, "ClientApp"), "analyst-copilot"
+        )
+        self.assertEqual(
+            apim._metadata_dimension_value(SimpleNamespace(metadata_values={}), "ClientApp"),
+            "unknown",
+        )

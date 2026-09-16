@@ -412,7 +412,13 @@ def ensure_api_diagnostic(
     api_id: str,
     logger_id: str,
 ) -> Dict[str, Any]:
-    """Enable API-scope Application Insights diagnostics with LLM logging."""
+    """Enable API diagnostics with supported LLM settings when available.
+
+    In ``2025-09-01-preview``, ``largeLanguageModel.logs`` is invalid; the
+    LLM contract supports only ``requests`` and ``responses``. If a preview
+    contract rejects the LLM block, this helper falls back to plain
+    Application Insights diagnostics.
+    """
     diagnostic_id = "applicationinsights"
     logger_resource_id = (
         f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
@@ -421,26 +427,34 @@ def ensure_api_diagnostic(
         f"{_service_scope(subscription_id, resource_group, apim_name)}"
         f"/apis/{api_id}/diagnostics/{diagnostic_id}"
     )
-    body = {
-        "properties": {
-            "alwaysLog": "allErrors",
-            "loggerId": logger_resource_id,
-            "sampling": {"samplingType": "fixed", "percentage": 100},
-            "frontend": {"request": {"headers": []}, "response": {"headers": []}},
-            "backend": {"request": {"headers": []}, "response": {"headers": []}},
-            "largeLanguageModel": {
-                "logs": "all",
-                "requests": {"messages": "all", "maxSizeInBytes": 8192},
-                "responses": {"messages": "all", "maxSizeInBytes": 8192},
-            },
-        }
+    base_props = {
+        "alwaysLog": "allErrors",
+        "loggerId": logger_resource_id,
+        "sampling": {"samplingType": "fixed", "percentage": 100},
+        "frontend": {"request": {"headers": []}, "response": {"headers": []}},
+        "backend": {"request": {"headers": []}, "response": {"headers": []}},
     }
-    response = _request(
-        "PUT",
-        url,
-        params={"api-version": APIM_PREVIEW_API_VERSION},
-        json_body=body,
-    )
+    llm_props = dict(base_props)
+    llm_props["largeLanguageModel"] = {
+        "requests": {"messages": "all", "maxSizeInBytes": 8192},
+        "responses": {"messages": "all", "maxSizeInBytes": 8192},
+    }
+    try:
+        response = _request(
+            "PUT",
+            url,
+            params={"api-version": APIM_PREVIEW_API_VERSION},
+            json_body={"properties": llm_props},
+        )
+    except ApimError as exc:
+        if exc.status_code != 400 or "largelanguagemodel" not in (exc.body or "").lower():
+            raise
+        response = _request(
+            "PUT",
+            url,
+            params={"api-version": APIM_PREVIEW_API_VERSION},
+            json_body={"properties": base_props},
+        )
     _wait_for_completion(response)
     return _json_body(response)
 

@@ -384,9 +384,12 @@ def ensure_logger(
             "app_insights_resource_id from which one can be resolved."
         )
     if not app_insights_connection_string and app_insights_resource_id:
-        app_insights_connection_string = get_app_insights_connection_string(
-            app_insights_resource_id
-        )
+        try:
+            app_insights_connection_string = get_app_insights_connection_string(
+                app_insights_resource_id
+            )
+        except (ApimError, requests.RequestException):
+            app_insights_connection_string = None
     if not app_insights_connection_string:
         raise ValueError(
             "Unable to obtain an Application Insights connection string. Set "

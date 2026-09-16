@@ -67,7 +67,7 @@ always masked in notebook output and are never printed in full.
 | # | Notebook | Topic | Status |
 | - | -------- | ----- | ------ |
 | 1 | [`demo1-token-limits.ipynb`](notebooks/demo1-token-limits.ipynb) | Token limits & quota enforcement (TPM burst -> 429, daily budget -> 403) | **Complete** |
-| 2 | [`demo2-placeholder.ipynb`](notebooks/demo2-placeholder.ipynb) | TBD | Coming soon |
+| 2 | [`demo2-token-metrics.ipynb`](notebooks/demo2-token-metrics.ipynb) | Token metering & chargeback dimensions | **Complete** |
 | 3 | [`demo3-placeholder.ipynb`](notebooks/demo3-placeholder.ipynb) | TBD | Coming soon |
 | 4 | [`demo4-placeholder.ipynb`](notebooks/demo4-placeholder.ipynb) | TBD | Coming soon |
 
@@ -94,7 +94,7 @@ policies/
 notebooks/
   00-setup-and-validation.ipynb  # shared prerequisite check
   demo1-token-limits.ipynb       # Demo 1 (complete)
-  demo2-placeholder.ipynb        # stub
+  demo2-token-metrics.ipynb      # Demo 2 (complete)
   demo3-placeholder.ipynb        # stub
   demo4-placeholder.ipynb        # stub
 ```
@@ -133,3 +133,49 @@ Demo 1 shows a complete, idempotent, end-to-end flow:
 
 Re-running `demo1-token-limits.ipynb` end to end, twice in a row, does not
 fail or duplicate any Azure resources.
+
+## Demo 2: Token metering & chargeback dimensions
+
+Demo 2 builds on the **same APIM instance** and Azure OpenAI / Microsoft
+Foundry backend values used in Demo 1. It creates only Demo 2-scoped APIM
+resources on that existing instance:
+
+1. A dedicated product (`demo2-metering`) and subscription
+   (`demo2-metering-sub`) for chargeback isolation.
+2. A dedicated API (`demo2-metering-api`), backend
+   (`demo2-openai-backend`), operation, and optional AOAI key named value.
+3. API-scope diagnostics wired to an Application Insights logger when the
+   required Application Insights values are available.
+4. An API-scope policy using `llm-emit-token-metric` to publish prompt,
+   completion, and total token metrics into the `module8` namespace, split by
+   `API ID`, `Subscription ID`, and bounded `ClientApp`.
+
+Before sending traffic, the notebook displays the required preflight checks
+out loud:
+
+- **Application Insights connected**: APIM has an Application Insights logger
+  or the notebook has enough `APP_INSIGHTS_*` values to create one.
+- **LLM API logging enabled**: the Demo 2 API diagnostic has LLM /
+  large-language-model logging settings.
+- **Custom metrics with dimensions enabled**: App Insights **Enable alerting
+  on custom metric dimensions** / usage-and-estimated-costs setting. If ARM
+  cannot detect the setting, the notebook shows a clear manual portal
+  instruction.
+- **Client sends a bounded `x-client-app` value**: the client helper enforces
+  an allow-list (`claims-portal`, `analyst-copilot`) before sending requests.
+
+To prove the meter, Demo 2 sends **five calls as `claims-portal`** and
+**three calls as `analyst-copilot`**, then queries token metrics in 5-minute
+bins split by `ClientApp`. The notebook includes retry/backoff because Azure
+Monitor and Application Insights custom metrics can have ingestion delay.
+
+Acceptance criteria displayed in the notebook:
+
+- **PASS 01:** Two `ClientApp` series appear.
+- **PASS 02:** Prompt + completion reconcile to total.
+- **PASS 03:** Subscription filters cleanly isolate chargeback.
+
+Demo 2 also includes the streaming caveat from the workshop deck: request
+token usage from the provider when supported
+(`stream_options: {"include_usage": true}`), and remember that interrupted
+streams can produce incomplete counts.

@@ -81,3 +81,42 @@ def plot_remaining_tokens(requests_log: List[Dict[str, Any]], trip_index: Option
     plt.tight_layout()
     plt.show()
     return fig
+
+
+def plot_token_series_by_dimension(
+    rows: Iterable[Dict[str, Any]],
+    dimension_name: str = "ClientApp",
+    metric_name: str = "total_tokens",
+):
+    """Plot token metric time series split by one dimension."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    df = pd.DataFrame(list(rows))
+    if df.empty:
+        display(Markdown("_No token metric rows to plot yet._"))
+        return None
+
+    df = df[df["metric_name"] == metric_name].copy()
+    if df.empty:
+        display(Markdown(f"_No rows found for metric `{metric_name}`._"))
+        return None
+
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    pivot = df.pivot_table(
+        index="timestamp",
+        columns="dimension_value",
+        values="total",
+        aggfunc="sum",
+        fill_value=0,
+    ).sort_index()
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    pivot.plot(ax=ax, marker="o")
+    ax.set_xlabel("5-minute bin")
+    ax.set_ylabel("Tokens")
+    ax.set_title(f"{metric_name} by {dimension_name}")
+    ax.legend(title=dimension_name)
+    plt.tight_layout()
+    plt.show()
+    return fig

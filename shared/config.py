@@ -22,7 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / ".env"
 
 # Fields that should never be echoed back in plain text.
-SECRET_FIELDS = {"aoai_key"}
+SECRET_FIELDS = {"aoai_key", "app_insights_connection_string"}
 
 # Supported Azure OpenAI request surfaces:
 #   "v1"      -> Microsoft Foundry / v1 surface: POST /openai/v1/chat/completions
@@ -43,13 +43,17 @@ class WorkshopConfig:
     aoai_key: Optional[str] = None
     aoai_api_version: str = "2024-10-21"
     aoai_api_style: str = "v1"
+    app_insights_name: Optional[str] = None
+    app_insights_resource_id: Optional[str] = None
+    app_insights_connection_string: Optional[str] = None
     demo_run: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     def as_display_dict(self) -> Dict[str, str]:
         """Return a dict safe for printing (secrets masked)."""
         data = asdict(self)
-        if data.get("aoai_key"):
-            data["aoai_key"] = mask_secret(data["aoai_key"])
+        for field_name in SECRET_FIELDS:
+            if data.get(field_name):
+                data[field_name] = mask_secret(data[field_name])
         return data
 
 
@@ -62,6 +66,9 @@ _ENV_KEYS = {
     "aoai_key": "AOAI_KEY",
     "aoai_api_version": "AOAI_API_VERSION",
     "aoai_api_style": "AOAI_API_STYLE",
+    "app_insights_name": "APP_INSIGHTS_NAME",
+    "app_insights_resource_id": "APP_INSIGHTS_RESOURCE_ID",
+    "app_insights_connection_string": "APP_INSIGHTS_CONNECTION_STRING",
     "demo_run": "DEMO_RUN",
 }
 
@@ -106,6 +113,11 @@ def load_config(interactive: bool = True) -> WorkshopConfig:
     cfg.aoai_api_version = os.environ.get("AOAI_API_VERSION", cfg.aoai_api_version)
     cfg.aoai_api_style = (
         os.environ.get("AOAI_API_STYLE", "").strip().lower() or cfg.aoai_api_style
+    )
+    cfg.app_insights_name = os.environ.get("APP_INSIGHTS_NAME") or None
+    cfg.app_insights_resource_id = os.environ.get("APP_INSIGHTS_RESOURCE_ID") or None
+    cfg.app_insights_connection_string = (
+        os.environ.get("APP_INSIGHTS_CONNECTION_STRING") or None
     )
     cfg.demo_run = os.environ.get("DEMO_RUN", "") or cfg.demo_run
 

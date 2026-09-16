@@ -456,12 +456,13 @@ def ensure_api_diagnostic(
             if (
                 llm_settings
                 and exc.status_code == 400
-                and "largeLanguageModel" in (exc.body or "")
+                and "largelanguagemodel" in (exc.body or "").lower()
             ):
                 continue
             raise
         _wait_for_completion(response)
         return _json_body(response)
+    raise RuntimeError("No API diagnostic request variant was attempted.")
 
 
 def get_api_diagnostic(

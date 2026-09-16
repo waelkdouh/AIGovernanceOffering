@@ -21,7 +21,7 @@ class EnsureApiDiagnosticTests(unittest.TestCase):
 
     def test_retries_without_llm_block_after_matching_validation_error(self):
         failed_response = SimpleNamespace(
-            status_code=400, text="Invalid field 'largeLanguageModel' specified"
+            status_code=400, text="Invalid field 'LARGELANGUAGEMODEL' specified"
         )
         error = apim.ApimError("PUT", "https://example.test", failed_response)
         response = SimpleNamespace(status_code=200, content=b"{}", text="{}")

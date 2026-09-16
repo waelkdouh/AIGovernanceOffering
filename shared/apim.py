@@ -460,7 +460,9 @@ def ensure_api_diagnostic(
             raise
         _wait_for_completion(response)
         return _json_body(response)
-    raise last_error
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("No API diagnostic request variant was attempted.")
 
 
 def get_api_diagnostic(

@@ -31,3 +31,12 @@ class EnsureApiDiagnosticTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         fallback_properties = request.call_args.kwargs["json_body"]["properties"]
         self.assertNotIn("largeLanguageModel", fallback_properties)
+
+    def test_reraises_unrelated_error_without_retrying(self):
+        failed_response = SimpleNamespace(status_code=400, text="Invalid field 'loggerId'")
+        error = apim.ApimError("PUT", "https://example.test", failed_response)
+        with patch.object(apim, "_request", side_effect=error) as request:
+            with self.assertRaisesRegex(apim.ApimError, "loggerId"):
+                apim.ensure_api_diagnostic("sub", "rg", "apim", "api", "logger")
+
+        self.assertEqual(request.call_count, 1)

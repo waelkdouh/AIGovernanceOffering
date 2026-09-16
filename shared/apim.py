@@ -352,7 +352,7 @@ def get_logger(
 
 
 def get_app_insights_connection_string(app_insights_resource_id: str) -> Optional[str]:
-    """Return an Application Insights connection string from its ARM resource."""
+    """Return an Application Insights connection string, or None if unavailable."""
     url = f"{ARM_BASE}{app_insights_resource_id}"
     response = _request("GET", url, params={"api-version": APP_INSIGHTS_API_VERSION})
     properties = _json_body(response).get("properties", {})

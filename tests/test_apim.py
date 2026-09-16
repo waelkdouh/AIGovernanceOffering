@@ -49,6 +49,23 @@ class AppInsightsConnectionStringTests(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_missing_logger_credentials_are_rejected(self):
+        with self.assertRaises(ValueError) as raised:
+            apim.ensure_logger("subscription", "group", "service", "logger")
+
+        self.assertIn("app_insights_connection_string", str(raised.exception))
+
+    def test_missing_resource_credentials_are_rejected(self):
+        with patch.object(apim, "get_app_insights_connection_string", return_value=None):
+            with self.assertRaises(ValueError) as raised:
+                apim.ensure_logger(
+                    "subscription", "group", "service", "logger",
+                    app_insights_resource_id="/resource",
+                )
+
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertIn("/resource", str(raised.exception))
+
     def test_lookup_error_is_chained_to_configuration_guidance(self):
         lookup_error = requests.RequestException("unavailable")
         with patch.object(

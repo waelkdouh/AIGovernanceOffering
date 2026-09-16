@@ -165,10 +165,11 @@ out loud:
   an allow-list (`claims-portal`, `analyst-copilot`) before sending requests.
 
 Demo 2 reuses an existing APIM Application Insights logger when one is
-available. To create a new logger, set `APP_INSIGHTS_CONNECTION_STRING` along
-with `APP_INSIGHTS_RESOURCE_ID` (or `APP_INSIGHTS_NAME`); a resource ID alone
-is not sufficient. The connection string is optional when APIM already has an
-Application Insights logger.
+available. APIM requires a connection string to create a new logger, but the
+notebook resolves it from a readable `APP_INSIGHTS_RESOURCE_ID` (or
+`APP_INSIGHTS_NAME`) when possible. Set `APP_INSIGHTS_CONNECTION_STRING` when
+that lookup is unavailable; it is optional when APIM already has an Application
+Insights logger.
 
 To prove the meter, Demo 2 sends **five calls as `claims-portal`** and
 **three calls as `analyst-copilot`**, then queries token metrics in 5-minute

@@ -434,35 +434,29 @@ def ensure_api_diagnostic(
         "frontend": {"request": {"headers": []}, "response": {"headers": []}},
         "backend": {"request": {"headers": []}, "response": {"headers": []}},
     }
-    llm_variants = [
-        {
-            "requests": {"messages": "all", "maxSizeInBytes": 8192},
-            "responses": {"messages": "all", "maxSizeInBytes": 8192},
-        },
-        None,
-    ]
-    for llm_settings in llm_variants:
-        props = dict(base_props)
-        if llm_settings:
-            props["largeLanguageModel"] = llm_settings
-        try:
-            response = _request(
-                "PUT",
-                url,
-                params={"api-version": APIM_PREVIEW_API_VERSION},
-                json_body={"properties": props},
-            )
-        except ApimError as exc:
-            if (
-                llm_settings
-                and exc.status_code == 400
-                and "largelanguagemodel" in (exc.body or "").lower()
-            ):
-                continue
+    llm_props = dict(base_props)
+    llm_props["largeLanguageModel"] = {
+        "requests": {"messages": "all", "maxSizeInBytes": 8192},
+        "responses": {"messages": "all", "maxSizeInBytes": 8192},
+    }
+    try:
+        response = _request(
+            "PUT",
+            url,
+            params={"api-version": APIM_PREVIEW_API_VERSION},
+            json_body={"properties": llm_props},
+        )
+    except ApimError as exc:
+        if exc.status_code != 400 or "largelanguagemodel" not in (exc.body or "").lower():
             raise
-        _wait_for_completion(response)
-        return _json_body(response)
-    raise RuntimeError("No API diagnostic request variant was attempted.")
+        response = _request(
+            "PUT",
+            url,
+            params={"api-version": APIM_PREVIEW_API_VERSION},
+            json_body={"properties": base_props},
+        )
+    _wait_for_completion(response)
+    return _json_body(response)
 
 
 def get_api_diagnostic(

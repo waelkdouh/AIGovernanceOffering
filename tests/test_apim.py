@@ -30,7 +30,7 @@ class AppInsightsConnectionStringTests(unittest.TestCase):
         request.assert_called_once_with(
             "GET",
             f"{apim.ARM_BASE}{resource_id}",
-            params={"api-version": "2020-02-02"},
+            params={"api-version": apim.APP_INSIGHTS_API_VERSION},
         )
 
     def test_falls_back_to_instrumentation_key(self):

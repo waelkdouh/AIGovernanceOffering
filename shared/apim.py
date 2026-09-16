@@ -19,6 +19,7 @@ from .auth import get_arm_token
 
 ARM_BASE = "https://management.azure.com"
 API_VERSION = "2022-08-01"
+APP_INSIGHTS_API_VERSION = "2020-02-02"
 APIM_PREVIEW_API_VERSION = "2025-09-01-preview"
 
 # How long to wait for APIM's async provisioning (e.g. a service that is
@@ -353,7 +354,7 @@ def get_logger(
 def get_app_insights_connection_string(app_insights_resource_id: str) -> Optional[str]:
     """Return an Application Insights connection string from its ARM resource."""
     url = f"{ARM_BASE}{app_insights_resource_id}"
-    response = _request("GET", url, params={"api-version": "2020-02-02"})
+    response = _request("GET", url, params={"api-version": APP_INSIGHTS_API_VERSION})
     properties = _json_body(response).get("properties", {})
     connection_string = properties.get("ConnectionString")
     if connection_string:

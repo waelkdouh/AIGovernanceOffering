@@ -164,6 +164,12 @@ out loud:
 - **Client sends a bounded `x-client-app` value**: the client helper enforces
   an allow-list (`claims-portal`, `analyst-copilot`) before sending requests.
 
+Demo 2 reuses an existing APIM Application Insights logger when one is
+available. To create a new logger, set `APP_INSIGHTS_CONNECTION_STRING` along
+with `APP_INSIGHTS_RESOURCE_ID` (or `APP_INSIGHTS_NAME`); a resource ID alone
+is not sufficient. The connection string is optional when APIM already has an
+Application Insights logger.
+
 To prove the meter, Demo 2 sends **five calls as `claims-portal`** and
 **three calls as `analyst-copilot`**, then queries token metrics in 5-minute
 bins split by `ClientApp`. The notebook includes retry/backoff because Azure

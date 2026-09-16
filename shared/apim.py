@@ -350,6 +350,20 @@ def get_logger(
     return _json_body(response)
 
 
+def get_app_insights_connection_string(app_insights_resource_id: str) -> Optional[str]:
+    """Return an Application Insights connection string from its ARM resource."""
+    url = f"{ARM_BASE}{app_insights_resource_id}"
+    response = _request("GET", url, params={"api-version": "2020-02-02"})
+    properties = _json_body(response).get("properties", {})
+    connection_string = properties.get("ConnectionString")
+    if connection_string:
+        return connection_string
+    instrumentation_key = properties.get("InstrumentationKey")
+    if instrumentation_key:
+        return f"InstrumentationKey={instrumentation_key}"
+    return None
+
+
 def ensure_logger(
     subscription_id: str,
     resource_group: str,
@@ -361,14 +375,24 @@ def ensure_logger(
 ) -> Dict[str, Any]:
     """Create or update an APIM Application Insights logger.
 
-    Provide either an Application Insights resource id, a connection string, or
-    both. APIM accepts the connection string in the logger credentials and the
-    resource id as the Azure resource backing the logger.
+    Provide a connection string, or a resource ID from which one can be
+    resolved. APIM requires the connection string in the logger credentials.
     """
     if not (app_insights_resource_id or app_insights_connection_string):
         raise ValueError(
             "ensure_logger requires app_insights_resource_id, "
             "app_insights_connection_string, or both."
+        )
+    if not app_insights_connection_string and app_insights_resource_id:
+        app_insights_connection_string = get_app_insights_connection_string(
+            app_insights_resource_id
+        )
+    if not app_insights_connection_string:
+        raise ValueError(
+            "Unable to obtain an Application Insights connection string. Set "
+            "APP_INSIGHTS_CONNECTION_STRING in .env, or retrieve it with "
+            "az monitor app-insights component show -g <rg> -a <name> "
+            "--query connectionString -o tsv."
         )
 
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"

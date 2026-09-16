@@ -383,20 +383,25 @@ def ensure_logger(
             "ensure_logger requires app_insights_connection_string or an "
             "app_insights_resource_id from which one can be resolved."
         )
+    connection_string_error: Optional[Exception] = None
     if not app_insights_connection_string and app_insights_resource_id:
         try:
             app_insights_connection_string = get_app_insights_connection_string(
                 app_insights_resource_id
             )
-        except (ApimError, requests.RequestException):
+        except (ApimError, requests.RequestException) as exc:
             app_insights_connection_string = None
+            connection_string_error = exc
     if not app_insights_connection_string:
-        raise ValueError(
+        error = ValueError(
             "Unable to obtain an Application Insights connection string. Set "
             "APP_INSIGHTS_CONNECTION_STRING in .env, or retrieve it with "
             "az monitor app-insights component show -g <rg> -a <name> "
             "--query connectionString -o tsv."
         )
+        if connection_string_error:
+            raise error from connection_string_error
+        raise error
 
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
     properties: Dict[str, Any] = {

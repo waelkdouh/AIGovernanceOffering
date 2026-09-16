@@ -9,6 +9,7 @@ workshop demos, not just Demo 1.
 from __future__ import annotations
 
 import json as _json
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -571,6 +572,75 @@ def check_custom_metric_dimensions_enabled(
     }
 
 
+METRICS_DEPENDENCY_HINT = (
+    "Azure Monitor metrics queries require 'azure-monitor-querymetrics' (the "
+    "MetricsClient moved out of 'azure-monitor-query' in its 2.0.0 release). "
+    "Install it with: pip install -r requirements.txt  (then restart the "
+    "Jupyter kernel)."
+)
+
+# location of an APIM resource, keyed by lowercase resource id
+_METRICS_REGION_CACHE: Dict[str, str] = {}
+
+
+def check_metrics_dependencies() -> None:
+    """Fail fast with an actionable message when metrics packages are missing."""
+    try:
+        import azure.monitor.querymetrics  # noqa: F401
+    except ImportError as exc:  # pragma: no cover - depends on the environment
+        raise ImportError(METRICS_DEPENDENCY_HINT) from exc
+
+
+def _normalize_region(location: str) -> str:
+    """Turn an ARM location (e.g. 'East US') into a metrics host label ('eastus')."""
+    return "".join(location.split()).lower()
+
+
+def resolve_metrics_region(resource_id: str, region: Optional[str] = None) -> str:
+    """Resolve the Azure region used to build the metrics data-plane endpoint.
+
+    Precedence: explicit ``region`` argument, then the ``AZURE_METRICS_REGION``
+    environment variable, then the ``location`` reported by ARM for the
+    resource itself (cached per resource id).
+    """
+    if region:
+        return _normalize_region(region)
+    env_region = os.environ.get("AZURE_METRICS_REGION")
+    if env_region:
+        return _normalize_region(env_region)
+
+    cache_key = resource_id.lower()
+    cached = _METRICS_REGION_CACHE.get(cache_key)
+    if cached:
+        return cached
+
+    response = _request("GET", f"{ARM_BASE}{resource_id}")
+    location = _json_body(response).get("location") if response.status_code == 200 else None
+    if not location:
+        raise ApimError("GET", f"{ARM_BASE}{resource_id}", response)
+    normalized = _normalize_region(location)
+    _METRICS_REGION_CACHE[cache_key] = normalized
+    return normalized
+
+
+def metrics_endpoint(resource_id: str, region: Optional[str] = None) -> str:
+    """Regional metrics data-plane endpoint for ``MetricsClient``."""
+    return f"https://{resolve_metrics_region(resource_id, region)}.metrics.monitor.azure.com"
+
+
+def _metadata_dimension_value(timeseries: Any, dimension_name: str) -> str:
+    """Read a dimension value from timeseries metadata (dict or legacy items)."""
+    metadata_values = getattr(timeseries, "metadata_values", None) or {}
+    if isinstance(metadata_values, dict):
+        metadata = dict(metadata_values)
+    else:
+        metadata = {
+            item.name.value if hasattr(item.name, "value") else item.name: item.value
+            for item in metadata_values
+        }
+    return metadata.get(dimension_name) or "unknown"
+
+
 def query_token_metrics(
     resource_id: str,
     metric_names: Iterable[str],
@@ -580,9 +650,11 @@ def query_token_metrics(
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
     interval_minutes: int = 5,
+    region: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Query Azure Monitor metrics for APIM token metrics split by a dimension."""
-    from azure.monitor.query import MetricAggregationType, MetricsQueryClient
+    check_metrics_dependencies()
+    from azure.monitor.querymetrics import MetricAggregationType, MetricsClient
 
     from .auth import get_credential
 
@@ -594,11 +666,11 @@ def query_token_metrics(
         filters.append(f"Subscription ID eq '{subscription_filter}'")
     metric_filter = " and ".join(filters)
 
-    client = MetricsQueryClient(get_credential())
-    result = client.query_resource(
-        resource_id,
-        metric_names=list(metric_names),
+    client = MetricsClient(metrics_endpoint(resource_id, region), get_credential())
+    results = client.query_resources(
+        resource_ids=[resource_id],
         metric_namespace=namespace,
+        metric_names=list(metric_names),
         timespan=(start_time, end_time),
         granularity=timedelta(minutes=interval_minutes),
         aggregations=[MetricAggregationType.TOTAL],
@@ -606,26 +678,23 @@ def query_token_metrics(
     )
 
     rows: List[Dict[str, Any]] = []
-    for metric in result.metrics:
-        for timeseries in metric.timeseries:
-            metadata = {
-                item.name.value if hasattr(item.name, "value") else item.name: item.value
-                for item in timeseries.metadata_values
-            }
-            dimension_value = metadata.get(dimension_name, "unknown")
-            for point in timeseries.data:
-                total = getattr(point, "total", None)
-                if total is None:
-                    continue
-                rows.append(
-                    {
-                        "timestamp": point.timestamp,
-                        "metric_name": metric.name,
-                        "dimension_name": dimension_name,
-                        "dimension_value": dimension_value,
-                        "total": total,
-                    }
-                )
+    for result in results:
+        for metric in result.metrics:
+            for timeseries in metric.timeseries:
+                dimension_value = _metadata_dimension_value(timeseries, dimension_name)
+                for point in timeseries.data:
+                    total = getattr(point, "total", None)
+                    if total is None:
+                        continue
+                    rows.append(
+                        {
+                            "timestamp": point.timestamp,
+                            "metric_name": metric.name,
+                            "dimension_name": dimension_name,
+                            "dimension_value": dimension_value,
+                            "total": total,
+                        }
+                    )
     return rows
 
 

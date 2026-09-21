@@ -661,7 +661,11 @@ def query_token_metrics(
     end_time = end_time or datetime.now(timezone.utc)
     start_time = start_time or (end_time - timedelta(minutes=30))
 
+    # The batch metrics API always splits by Microsoft.ResourceId, so it must be
+    # part of the dimension filter or Azure returns InvalidSeries.
     filters = [f"{dimension_name} eq '*'"]
+    if dimension_name != "Microsoft.ResourceId":
+        filters.append("Microsoft.ResourceId eq '*'")
     if subscription_filter:
         filters.append(f"Subscription ID eq '{subscription_filter}'")
     metric_filter = " and ".join(filters)

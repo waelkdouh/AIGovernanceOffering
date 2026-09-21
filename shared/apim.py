@@ -736,7 +736,9 @@ customMetrics
     if not response.tables:
         return []
     table = response.tables[0]
-    columns = [column.name for column in table.columns]
+    columns = [
+        column if isinstance(column, str) else column.name for column in table.columns
+    ]
     return [
         {
             "timestamp": row[columns.index("timestamp")],

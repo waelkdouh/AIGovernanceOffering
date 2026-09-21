@@ -171,6 +171,72 @@ class TokenMetricsTests(unittest.TestCase):
             ],
         )
 
+    def _query_app_insights_token_metrics(self, columns):
+        timestamp = object()
+        table = SimpleNamespace(
+            columns=columns,
+            rows=[[timestamp, "prompt_tokens", "claims-portal", 12.0]],
+        )
+
+        def fake_client(credential):
+            return SimpleNamespace(
+                query_resource=lambda *args, **kwargs: SimpleNamespace(tables=[table])
+            )
+
+        monitor_query = SimpleNamespace(LogsQueryClient=fake_client)
+        with (
+            patch.dict("sys.modules", {"azure.monitor.query": monitor_query}),
+            patch("shared.auth.get_credential", return_value=object()),
+        ):
+            return timestamp, apim.query_app_insights_token_metrics(
+                app_insights_resource_id=(
+                    "/subscriptions/sub/resourceGroups/rg"
+                    "/providers/Microsoft.Insights/components/appi"
+                ),
+                metric_names=["prompt_tokens"],
+            )
+
+    def test_query_app_insights_token_metrics_accepts_string_columns(self):
+        timestamp, rows = self._query_app_insights_token_metrics(
+            ["timestamp", "metric_name", "dimension_value", "total"]
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "timestamp": timestamp,
+                    "metric_name": "prompt_tokens",
+                    "dimension_name": "ClientApp",
+                    "dimension_value": "claims-portal",
+                    "total": 12.0,
+                }
+            ],
+        )
+
+    def test_query_app_insights_token_metrics_accepts_named_columns(self):
+        timestamp, rows = self._query_app_insights_token_metrics(
+            [
+                SimpleNamespace(name="timestamp"),
+                SimpleNamespace(name="metric_name"),
+                SimpleNamespace(name="dimension_value"),
+                SimpleNamespace(name="total"),
+            ]
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "timestamp": timestamp,
+                    "metric_name": "prompt_tokens",
+                    "dimension_name": "ClientApp",
+                    "dimension_value": "claims-portal",
+                    "total": 12.0,
+                }
+            ],
+        )
+
     def test_legacy_metadata_items_still_resolve_dimension(self):
         timeseries = SimpleNamespace(
             metadata_values=[

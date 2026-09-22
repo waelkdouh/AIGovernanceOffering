@@ -52,6 +52,7 @@ class EnsureApiDiagnosticTests(unittest.TestCase):
         properties = request.call_args.kwargs["json_body"]["properties"]
         self.assertNotIn("logs", properties["largeLanguageModel"])
         self.assertEqual(properties["alwaysLog"], "allErrors")
+        self.assertIs(properties["metrics"], True)
         self.assertIn("loggerId", properties)
         self.assertIn("sampling", properties)
         self.assertIn("frontend", properties)
@@ -69,6 +70,7 @@ class EnsureApiDiagnosticTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         fallback_properties = request.call_args.kwargs["json_body"]["properties"]
         self.assertNotIn("largeLanguageModel", fallback_properties)
+        self.assertIs(fallback_properties["metrics"], True)
 
     def test_reraises_unrelated_error_without_retrying(self):
         failed_response = SimpleNamespace(status_code=400, text="Invalid field 'loggerId'")
@@ -78,6 +80,33 @@ class EnsureApiDiagnosticTests(unittest.TestCase):
                 apim.ensure_api_diagnostic("sub", "rg", "apim", "api", "logger")
 
         self.assertEqual(request.call_count, 1)
+
+
+class GetApiPolicyTests(unittest.TestCase):
+    POLICY_XML = '<policies><inbound><llm-emit-token-metric namespace="module8" /></inbound></policies>'
+
+    def test_raw_xml_response_returns_policy_document(self):
+        response = SimpleNamespace(
+            status_code=200,
+            content=self.POLICY_XML.encode("utf-8"),
+            text=self.POLICY_XML,
+        )
+        with patch.object(apim, "_request", return_value=response) as request:
+            policy = apim.get_api_policy("sub", "rg", "apim", "api")
+
+        self.assertEqual(request.call_args.kwargs["params"]["format"], "rawxml")
+        self.assertEqual(policy["properties"]["value"], self.POLICY_XML)
+        self.assertEqual(policy["properties"]["format"], "rawxml")
+
+    def test_json_response_is_parsed(self):
+        body = '{"properties": {"format": "xaml", "value": "<policies />"}}'
+        response = SimpleNamespace(status_code=200, content=body.encode("utf-8"), text=body)
+        with patch.object(apim, "_request", return_value=response):
+            policy = apim.get_api_policy(
+                "sub", "rg", "apim", "api", policy_format="xaml"
+            )
+
+        self.assertEqual(policy["properties"]["value"], "<policies />")
 
 
 class TokenMetricsTests(unittest.TestCase):

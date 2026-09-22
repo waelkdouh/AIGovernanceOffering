@@ -430,6 +430,11 @@ def ensure_api_diagnostic(
     base_props = {
         "alwaysLog": "allErrors",
         "loggerId": logger_resource_id,
+        # "Support custom metrics" in the portal. Without it emit-metric and
+        # llm-emit-token-metric run, the request succeeds, and the metric is
+        # silently discarded. ARM PUT is a full replace, so this must be sent on
+        # every call or the setting reverts to its default of false.
+        "metrics": True,
         "sampling": {"samplingType": "fixed", "percentage": 100},
         "frontend": {"request": {"headers": []}, "response": {"headers": []}},
         "backend": {"request": {"headers": []}, "response": {"headers": []}},
@@ -728,6 +733,11 @@ def get_api_policy(
     quotes and expressions XML-escaped (e.g. ``backend-id=&quot;...&quot;``).
     Request ``rawxml`` so callers can match directives such as
     ``set-backend-service`` literally instead of against escaped XML.
+
+    ARM returns the raw XML document rather than a JSON envelope for
+    ``rawxml``. This helper always returns the JSON envelope shape, so the
+    policy document is available at ``["properties"]["value"]`` for both
+    formats.
     """
     url = (
         f"{_service_scope(subscription_id, resource_group, apim_name)}"
@@ -736,7 +746,13 @@ def get_api_policy(
     response = _request("GET", url, params={"format": policy_format})
     if response.status_code == 404:
         raise ApimError("GET", response.url, response)
-    return _json_body(response)
+    body = _json_body(response)
+    if body:
+        return body
+    text = (response.text or "").lstrip("\ufeff")
+    if not text.strip():
+        return {}
+    return {"properties": {"format": policy_format, "value": text}}
 
 
 def get_gateway_url(subscription_id: str, resource_group: str, apim_name: str) -> str:

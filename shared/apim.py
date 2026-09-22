@@ -355,21 +355,26 @@ def ensure_logger(
     resource_group: str,
     apim_name: str,
     logger_id: str,
+    *,
+    app_insights_connection_string: str,
     app_insights_resource_id: Optional[str] = None,
-    app_insights_connection_string: Optional[str] = None,
     description: str = "",
 ) -> Dict[str, Any]:
     """Create or update an APIM Application Insights logger.
 
-    Provide either an Application Insights resource id, a connection string, or
-    both. APIM accepts the connection string in the logger credentials and the
-    resource id as the Azure resource backing the logger.
+    Provide the required Application Insights connection string, optionally with
+    the resource id as the Azure resource backing the logger. APIM requires
+    non-empty credentials on Application Insights loggers, even when
+    ``resourceId`` is supplied, so callers that have only a resource id must set
+    ``APP_INSIGHTS_CONNECTION_STRING`` before calling this helper.
     """
-    if not (app_insights_resource_id or app_insights_connection_string):
+    if not (app_insights_connection_string or "").strip():
         raise ValueError(
-            "ensure_logger requires app_insights_resource_id, "
-            "app_insights_connection_string, or both."
+            "APIM requires credentials on an Application Insights logger. "
+            "Set APP_INSIGHTS_CONNECTION_STRING from the Application Insights "
+            "resource's Overview blade before calling ensure_logger."
         )
+    app_insights_resource_id = (app_insights_resource_id or "").strip()
 
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
     properties: Dict[str, Any] = {

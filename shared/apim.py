@@ -661,25 +661,58 @@ def query_token_metrics(
     end_time = end_time or datetime.now(timezone.utc)
     start_time = start_time or (end_time - timedelta(minutes=30))
 
-    # The batch metrics API always splits by Microsoft.ResourceId, so it must be
-    # part of the dimension filter or Azure returns InvalidSeries.
-    filters = [f"{dimension_name} eq '*'"]
-    if dimension_name != "Microsoft.ResourceId":
-        filters.append("Microsoft.ResourceId eq '*'")
+    # The batch metrics API (MetricsClient.query_resources) always splits by
+    # Microsoft.ResourceId, so that clause must be part of the dimension filter
+    # or Azure returns InvalidSeries. However, when the regional endpoint instead
+    # serves the request through the resource-level metrics path,
+    # Microsoft.ResourceId is rejected as an invalid dimension with BadRequest.
+    # Since we can't know which path will handle the call ahead of time, try
+    # with the clause first (preserving the batch-API requirement) and, only if
+    # the service specifically rejects Microsoft.ResourceId as invalid, retry
+    # once without it.
+    base_filters = [f"{dimension_name} eq '*'"]
     if subscription_filter:
-        filters.append(f"Subscription ID eq '{subscription_filter}'")
-    metric_filter = " and ".join(filters)
+        base_filters.append(f"Subscription ID eq '{subscription_filter}'")
+
+    filter_candidates = [base_filters]
+    if dimension_name != "Microsoft.ResourceId":
+        filter_candidates = [
+            base_filters[:1] + ["Microsoft.ResourceId eq '*'"] + base_filters[1:],
+            base_filters,
+        ]
+
+    try:
+        from azure.core.exceptions import HttpResponseError
+
+        catch_types: tuple = (HttpResponseError,)
+    except ImportError:
+        catch_types = (Exception,)
 
     client = MetricsClient(metrics_endpoint(resource_id, region), get_credential())
-    results = client.query_resources(
-        resource_ids=[resource_id],
-        metric_namespace=namespace,
-        metric_names=list(metric_names),
-        timespan=(start_time, end_time),
-        granularity=timedelta(minutes=interval_minutes),
-        aggregations=[MetricAggregationType.TOTAL],
-        filter=metric_filter,
-    )
+
+    def _is_resource_id_dimension_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "microsoft.resourceid" in message and (
+            "invalid" in message or "not a valid dimension" in message
+        )
+
+    results = None
+    for index, candidate in enumerate(filter_candidates):
+        metric_filter = " and ".join(candidate)
+        try:
+            results = client.query_resources(
+                resource_ids=[resource_id],
+                metric_namespace=namespace,
+                metric_names=list(metric_names),
+                timespan=(start_time, end_time),
+                granularity=timedelta(minutes=interval_minutes),
+                aggregations=[MetricAggregationType.TOTAL],
+                filter=metric_filter,
+            )
+            break
+        except catch_types as exc:  # narrow retry to the ResourceId dimension error
+            if not _is_resource_id_dimension_error(exc) or index == len(filter_candidates) - 1:
+                raise
 
     rows: List[Dict[str, Any]] = []
     for result in results:

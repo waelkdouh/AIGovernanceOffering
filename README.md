@@ -50,13 +50,12 @@ az login
 jupyter notebook
 ```
 
-> **Upgrading an existing `.venv`?** Metrics querying now uses the
-> `azure-monitor-querymetrics` package, because `azure-monitor-query` 2.0.0
-> removed `MetricsQueryClient`/`MetricsClient` and kept only
-> `LogsQueryClient`. Re-run `pip install -r requirements.txt` and restart
-> your Jupyter kernel so the new package is picked up. If the APIM region
-> cannot be resolved automatically, set `AZURE_METRICS_REGION` (for example
-> `eastus`) to override the metrics endpoint region.
+> **Upgrading an existing `.venv`?** Token metrics are read from the
+> Application Insights `customMetrics` table with `azure-monitor-query`'s
+> `LogsQueryClient`: `llm-emit-token-metric` emits through the APIM
+> Application Insights logger, and custom metric namespaces are not served at
+> APIM resource scope. Re-run `pip install -r requirements.txt` and restart
+> your Jupyter kernel so the dependency set is picked up.
 
 1. Open and run **`notebooks/00-setup-and-validation.ipynb`** first. It
    confirms your `az login` session, lets you pick/confirm a subscription,

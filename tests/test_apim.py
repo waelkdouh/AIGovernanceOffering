@@ -43,6 +43,49 @@ class ApimPolicyTests(unittest.TestCase):
         )
 
 
+class EnsureLoggerTests(unittest.TestCase):
+    def test_requires_connection_string_even_with_resource_id(self):
+        with patch.object(apim, "_request") as request:
+            with self.assertRaisesRegex(
+                ValueError,
+                "APIM requires credentials.*APP_INSIGHTS_CONNECTION_STRING",
+            ):
+                apim.ensure_logger(
+                    "sub",
+                    "rg",
+                    "apim",
+                    "logger",
+                    app_insights_resource_id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Insights/components/appi",
+                )
+
+        request.assert_not_called()
+
+    def test_put_body_includes_resource_id_and_connection_string(self):
+        response = SimpleNamespace(status_code=200, content=b"{}", text="{}")
+        resource_id = (
+            "/subscriptions/sub/resourceGroups/rg/"
+            "providers/Microsoft.Insights/components/appi"
+        )
+
+        with patch.object(apim, "_request", return_value=response) as request:
+            apim.ensure_logger(
+                "sub",
+                "rg",
+                "apim",
+                "logger",
+                app_insights_resource_id=resource_id,
+                app_insights_connection_string="InstrumentationKey=key",
+                description="Demo logger",
+            )
+
+        properties = request.call_args.kwargs["json_body"]["properties"]
+        self.assertEqual(properties["resourceId"], resource_id)
+        self.assertEqual(
+            properties["credentials"]["connectionString"],
+            "InstrumentationKey=key",
+        )
+
+
 class EnsureApiDiagnosticTests(unittest.TestCase):
     def test_llm_request_has_no_logs_property(self):
         response = SimpleNamespace(status_code=200, content=b"{}", text="{}")

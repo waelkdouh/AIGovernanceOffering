@@ -79,6 +79,8 @@ class EnsureLoggerTests(unittest.TestCase):
                 description="Demo logger",
             )
 
+        self.assertEqual(request.call_args.args[0], "PUT")
+        self.assertTrue(request.call_args.args[1].endswith("/loggers/logger"))
         properties = request.call_args.kwargs["json_body"]["properties"]
         self.assertEqual(properties["resourceId"], resource_id)
         self.assertEqual(

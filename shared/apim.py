@@ -365,7 +365,8 @@ def ensure_logger(
     Provide the required Application Insights connection string, optionally with
     the resource id as the Azure resource backing the logger. APIM requires
     non-empty credentials on Application Insights loggers, even when
-    ``resourceId`` is supplied.
+    ``resourceId`` is supplied, so callers that have only a resource id must set
+    ``APP_INSIGHTS_CONNECTION_STRING`` before calling this helper.
     """
     if not (app_insights_connection_string or "").strip():
         raise ValueError(

@@ -9,7 +9,6 @@ workshop demos, not just Demo 1.
 from __future__ import annotations
 
 import json as _json
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
@@ -572,75 +571,6 @@ def check_custom_metric_dimensions_enabled(
     }
 
 
-METRICS_DEPENDENCY_HINT = (
-    "Azure Monitor metrics queries require 'azure-monitor-querymetrics' (the "
-    "MetricsClient moved out of 'azure-monitor-query' in its 2.0.0 release). "
-    "Install it with: pip install -r requirements.txt  (then restart the "
-    "Jupyter kernel)."
-)
-
-# location of an APIM resource, keyed by lowercase resource id
-_METRICS_REGION_CACHE: Dict[str, str] = {}
-
-
-def check_metrics_dependencies() -> None:
-    """Fail fast with an actionable message when metrics packages are missing."""
-    try:
-        import azure.monitor.querymetrics  # noqa: F401
-    except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise ImportError(METRICS_DEPENDENCY_HINT) from exc
-
-
-def _normalize_region(location: str) -> str:
-    """Turn an ARM location (e.g. 'East US') into a metrics host label ('eastus')."""
-    return "".join(location.split()).lower()
-
-
-def resolve_metrics_region(resource_id: str, region: Optional[str] = None) -> str:
-    """Resolve the Azure region used to build the metrics data-plane endpoint.
-
-    Precedence: explicit ``region`` argument, then the ``AZURE_METRICS_REGION``
-    environment variable, then the ``location`` reported by ARM for the
-    resource itself (cached per resource id).
-    """
-    if region:
-        return _normalize_region(region)
-    env_region = os.environ.get("AZURE_METRICS_REGION")
-    if env_region:
-        return _normalize_region(env_region)
-
-    cache_key = resource_id.lower()
-    cached = _METRICS_REGION_CACHE.get(cache_key)
-    if cached:
-        return cached
-
-    response = _request("GET", f"{ARM_BASE}{resource_id}")
-    location = _json_body(response).get("location") if response.status_code == 200 else None
-    if not location:
-        raise ApimError("GET", f"{ARM_BASE}{resource_id}", response)
-    normalized = _normalize_region(location)
-    _METRICS_REGION_CACHE[cache_key] = normalized
-    return normalized
-
-
-def metrics_endpoint(resource_id: str, region: Optional[str] = None) -> str:
-    """Regional metrics data-plane endpoint for ``MetricsClient``."""
-    return f"https://{resolve_metrics_region(resource_id, region)}.metrics.monitor.azure.com"
-
-
-def _metadata_dimension_value(timeseries: Any, dimension_name: str) -> str:
-    """Read a dimension value from timeseries metadata (dict or legacy items)."""
-    metadata_values = getattr(timeseries, "metadata_values", None) or {}
-    if isinstance(metadata_values, dict):
-        metadata = dict(metadata_values)
-    else:
-        metadata = {
-            item.name.value if hasattr(item.name, "value") else item.name: item.value
-            for item in metadata_values
-        }
-    return metadata.get(dimension_name) or "unknown"
-
-
 def query_token_metrics(
     resource_id: str,
     metric_names: Iterable[str],
@@ -651,88 +581,55 @@ def query_token_metrics(
     end_time: Optional[datetime] = None,
     interval_minutes: int = 5,
     region: Optional[str] = None,
+    app_insights_resource_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Query Azure Monitor metrics for APIM token metrics split by a dimension."""
-    check_metrics_dependencies()
-    from azure.monitor.querymetrics import MetricAggregationType, MetricsClient
+    """Query APIM token metrics, split by a dimension, from Application Insights.
 
-    from .auth import get_credential
+    ``llm-emit-token-metric`` publishes its custom metrics *through the APIM
+    Application Insights logger*; the policy's ``namespace`` attribute is only a
+    label on the App Insights custom metric. It does not create an Azure Monitor
+    metric namespace on the APIM resource, and custom metric namespaces are not
+    served at APIM resource scope at all. The batch/multi-resource metrics API
+    (``MetricsClient.query_resources``) additionally always projects
+    ``Microsoft.ResourceId`` and therefore requires it in the dimension filter.
+    Those two constraints together mean that client can never return token
+    metrics here, under any filter string - so this function reads the App
+    Insights ``customMetrics`` table instead.
 
-    end_time = end_time or datetime.now(timezone.utc)
-    start_time = start_time or (end_time - timedelta(minutes=30))
-
-    # The batch metrics API (MetricsClient.query_resources) always splits by
-    # Microsoft.ResourceId, so that clause must be part of the dimension filter
-    # or Azure returns InvalidSeries. However, when the regional endpoint instead
-    # serves the request through the resource-level metrics path,
-    # Microsoft.ResourceId is rejected as an invalid dimension with BadRequest.
-    # Since we can't know which path will handle the call ahead of time, try
-    # with the clause first (preserving the batch-API requirement) and, only if
-    # the service specifically rejects Microsoft.ResourceId as invalid, retry
-    # once without it.
-    base_filters = [f"{dimension_name} eq '*'"]
-    if subscription_filter:
-        base_filters.append(f"Subscription ID eq '{subscription_filter}'")
-
-    filter_candidates = [base_filters]
-    if dimension_name != "Microsoft.ResourceId":
-        filter_candidates = [
-            base_filters[:1] + ["Microsoft.ResourceId eq '*'"] + base_filters[1:],
-            base_filters,
-        ]
-
-    try:
-        from azure.core.exceptions import HttpResponseError
-
-        catch_types: tuple = (HttpResponseError,)
-    except ImportError:
-        catch_types = (Exception,)
-
-    client = MetricsClient(metrics_endpoint(resource_id, region), get_credential())
-
-    def _is_resource_id_dimension_error(exc: Exception) -> bool:
-        message = str(exc).lower()
-        return "microsoft.resourceid" in message and (
-            "invalid" in message or "not a valid dimension" in message
+    ``resource_id`` is the APIM service resource id; it is used to resolve the
+    connected Application Insights component when ``app_insights_resource_id``
+    is not supplied. ``namespace``, ``interval_minutes`` and ``region`` are kept
+    for backwards compatibility with existing callers and are unused.
+    """
+    target = app_insights_resource_id or _app_insights_for_apim_resource_id(resource_id)
+    if not target:
+        raise RuntimeError(
+            "No Application Insights resource could be resolved for "
+            f"{resource_id}. Pass app_insights_resource_id explicitly, or "
+            "attach an Application Insights logger to the APIM instance."
         )
+    return query_app_insights_token_metrics(
+        app_insights_resource_id=target,
+        metric_names=metric_names,
+        dimension_name=dimension_name,
+        subscription_filter=subscription_filter,
+        start_time=start_time,
+        end_time=end_time,
+    )
 
-    results = None
-    for index, candidate in enumerate(filter_candidates):
-        metric_filter = " and ".join(candidate)
-        try:
-            results = client.query_resources(
-                resource_ids=[resource_id],
-                metric_namespace=namespace,
-                metric_names=list(metric_names),
-                timespan=(start_time, end_time),
-                granularity=timedelta(minutes=interval_minutes),
-                aggregations=[MetricAggregationType.TOTAL],
-                filter=metric_filter,
-            )
-            break
-        except catch_types as exc:  # narrow retry to the ResourceId dimension error
-            if not _is_resource_id_dimension_error(exc) or index == len(filter_candidates) - 1:
-                raise
 
-    rows: List[Dict[str, Any]] = []
-    for result in results:
-        for metric in result.metrics:
-            for timeseries in metric.timeseries:
-                dimension_value = _metadata_dimension_value(timeseries, dimension_name)
-                for point in timeseries.data:
-                    total = getattr(point, "total", None)
-                    if total is None:
-                        continue
-                    rows.append(
-                        {
-                            "timestamp": point.timestamp,
-                            "metric_name": metric.name,
-                            "dimension_name": dimension_name,
-                            "dimension_value": dimension_value,
-                            "total": total,
-                        }
-                    )
-    return rows
+def _app_insights_for_apim_resource_id(resource_id: str) -> Optional[str]:
+    """Resolve the App Insights component wired to an APIM service resource id."""
+    parts = [part for part in resource_id.split("/") if part]
+    lowered = [part.lower() for part in parts]
+    try:
+        subscription_id = parts[lowered.index("subscriptions") + 1]
+        resource_group = parts[lowered.index("resourcegroups") + 1]
+        apim_name = parts[lowered.index("service") + 1]
+    except (ValueError, IndexError):
+        return None
+    logger = get_app_insights_for_apim(subscription_id, resource_group, apim_name)
+    return (logger or {}).get("app_insights_resource_id")
 
 
 def query_app_insights_token_metrics(
@@ -743,7 +640,7 @@ def query_app_insights_token_metrics(
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
-    """Fallback Kusto query against Application Insights customMetrics."""
+    """Kusto query for token metrics in the Application Insights customMetrics table."""
     from azure.monitor.query import LogsQueryClient
 
     from .auth import get_credential

@@ -86,229 +86,113 @@ class TokenMetricsTests(unittest.TestCase):
         "/providers/Microsoft.ApiManagement/service/apim"
     )
 
-    def setUp(self):
-        apim._METRICS_REGION_CACHE.clear()
-        self.addCleanup(apim._METRICS_REGION_CACHE.clear)
+    APP_INSIGHTS_ID = (
+        "/subscriptions/sub/resourceGroups/rg"
+        "/providers/Microsoft.Insights/components/appi"
+    )
 
-    def test_region_is_derived_from_arm_location_and_cached(self):
-        response = SimpleNamespace(
-            status_code=200, content=b"{}", text='{"location": "East US"}'
-        )
-        with patch.object(apim, "_request", return_value=response) as request:
-            self.assertEqual(apim.resolve_metrics_region(self.RESOURCE_ID), "eastus")
-            self.assertEqual(apim.resolve_metrics_region(self.RESOURCE_ID), "eastus")
+    def _fake_logs_client(self, tables, calls):
+        def fake_client(credential):
+            def query_resource(resource_id, query, timespan=None, **kwargs):
+                calls.append({"resource_id": resource_id, "query": query})
+                return SimpleNamespace(tables=tables)
 
-        self.assertEqual(request.call_count, 1)
-        self.assertEqual(
-            apim.metrics_endpoint(self.RESOURCE_ID),
-            "https://eastus.metrics.monitor.azure.com",
-        )
+            return SimpleNamespace(query_resource=query_resource)
 
-    def test_region_override_argument_and_environment_skip_arm(self):
-        with patch.object(apim, "_request", side_effect=AssertionError("no ARM call")):
-            self.assertEqual(
-                apim.resolve_metrics_region(self.RESOURCE_ID, region="West Europe"),
-                "westeurope",
-            )
-            with patch.dict(apim.os.environ, {"AZURE_METRICS_REGION": "North Europe"}):
-                self.assertEqual(
-                    apim.resolve_metrics_region(self.RESOURCE_ID), "northeurope"
-                )
+        return SimpleNamespace(LogsQueryClient=fake_client)
 
-    def _query_token_metrics(self, metadata_values=None, side_effects=None, **kwargs):
-        timestamp = object()
-        timeseries = SimpleNamespace(
-            metadata_values=metadata_values or {"ClientApp": "claims-portal"},
-            data=[
-                SimpleNamespace(timestamp=timestamp, total=12.0),
-                SimpleNamespace(timestamp=timestamp, total=None),
-            ],
-        )
-        metric = SimpleNamespace(name="prompt_tokens", timeseries=[timeseries])
-        result = SimpleNamespace(metrics=[metric])
-        calls = []
-        endpoint_calls = []
-
-        def query_resources(**kwargs):
-            calls.append(kwargs)
-            if side_effects:
-                index = len(calls) - 1
-                if index < len(side_effects):
-                    effect = side_effects[index]
-                    if isinstance(effect, BaseException):
-                        raise effect
-                    if effect is not None:
-                        return effect
-            return [result]
-
-        def fake_client(endpoint, credential):
-            endpoint_calls.append(endpoint)
-            return SimpleNamespace(query_resources=query_resources)
-
-        querymetrics = SimpleNamespace(
-            MetricsClient=fake_client,
-            MetricAggregationType=SimpleNamespace(TOTAL="Total"),
-        )
-        with (
-            patch.dict(
-                "sys.modules", {"azure.monitor.querymetrics": querymetrics}
-            ),
-            patch.object(apim, "check_metrics_dependencies"),
-            patch.object(apim, "metrics_endpoint", return_value="https://eastus.metrics.monitor.azure.com"),
-            patch("shared.auth.get_credential", return_value=object()),
-        ):
-            rows = apim.query_token_metrics(
-                resource_id=self.RESOURCE_ID,
-                metric_names=["prompt_tokens"],
-                **kwargs,
-            )
-
-        filters = [call["filter"] for call in calls]
-        captured = dict(calls[-1]) if calls else {}
-        if endpoint_calls:
-            captured["endpoint"] = endpoint_calls[-1]
-        return timestamp, captured, rows, filters
-
-    def test_query_token_metrics_uses_batch_client_and_keeps_row_shape(self):
-        timestamp, captured, rows, filters = self._query_token_metrics(
-            subscription_filter="demo-sub"
-        )
-
-        self.assertEqual(captured["resource_ids"], [self.RESOURCE_ID])
-        self.assertEqual(
-            captured["filter"],
-            "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
-            " and Subscription ID eq 'demo-sub'",
-        )
-        self.assertEqual(len(filters), 1)
-        self.assertEqual(
-            rows,
-            [
-                {
-                    "timestamp": timestamp,
-                    "metric_name": "prompt_tokens",
-                    "dimension_name": "ClientApp",
-                    "dimension_value": "claims-portal",
-                    "total": 12.0,
-                }
-            ],
-        )
-
-    def test_query_token_metrics_filters_resource_id_without_subscription(self):
-        _, _, _, filters = self._query_token_metrics()
-
-        self.assertEqual(
-            filters[0], "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
-        )
-        self.assertEqual(len(filters), 1)
-
-    def test_query_token_metrics_does_not_duplicate_resource_id_clause(self):
-        _, captured, _, filters = self._query_token_metrics(
-            dimension_name="Microsoft.ResourceId"
-        )
-
-        self.assertEqual(captured["filter"], "Microsoft.ResourceId eq '*'")
-        self.assertEqual(captured["filter"].count("Microsoft.ResourceId"), 1)
-        self.assertEqual(len(filters), 1)
-
-    def test_query_token_metrics_resolves_client_app_with_resource_id_metadata(self):
-        _, _, rows, _ = self._query_token_metrics(
-            metadata_values={
-                "Microsoft.ResourceId": self.RESOURCE_ID,
-                "ClientApp": "claims-portal",
-            }
-        )
-
-        self.assertEqual(rows[0]["dimension_value"], "claims-portal")
-
-    def test_query_token_metrics_retries_without_resource_id_on_rejection(self):
-        error = apim.ApimError(
-            "GET",
-            "https://example.test",
-            SimpleNamespace(
-                status_code=400,
-                text="Dimensions: microsoft.resourceid are invalid at Resource level",
-            ),
-        )
-        timestamp, captured, rows, filters = self._query_token_metrics(
-            subscription_filter="demo-sub",
-            side_effects=[error],
-        )
-
-        self.assertEqual(
-            filters,
-            [
-                "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
-                " and Subscription ID eq 'demo-sub'",
-                "ClientApp eq '*' and Subscription ID eq 'demo-sub'",
-            ],
-        )
-        self.assertEqual(
-            captured["filter"], "ClientApp eq '*' and Subscription ID eq 'demo-sub'"
-        )
-        self.assertEqual(
-            rows,
-            [
-                {
-                    "timestamp": timestamp,
-                    "metric_name": "prompt_tokens",
-                    "dimension_name": "ClientApp",
-                    "dimension_value": "claims-portal",
-                    "total": 12.0,
-                }
-            ],
-        )
-
-    def test_query_token_metrics_propagates_unrelated_error_without_retry(self):
-        error = RuntimeError("throttled: too many requests")
-
-        with self.assertRaises(RuntimeError):
-            self._query_token_metrics(side_effects=[error])
-
-    def test_query_token_metrics_reraises_after_both_attempts_fail(self):
-        first_error = apim.ApimError(
-            "GET",
-            "https://example.test",
-            SimpleNamespace(
-                status_code=400,
-                text="Dimensions: microsoft.resourceid are invalid at Resource level",
-            ),
-        )
-        second_error = apim.ApimError(
-            "GET",
-            "https://example.test",
-            SimpleNamespace(
-                status_code=400,
-                text="Dimensions: microsoft.resourceid not a valid dimension",
-            ),
-        )
-
-        with self.assertRaises(apim.ApimError):
-            self._query_token_metrics(side_effects=[first_error, second_error])
-
-    def _query_app_insights_token_metrics(self, columns):
+    def _query_app_insights_token_metrics(self, columns, calls=None, **kwargs):
         timestamp = object()
         table = SimpleNamespace(
             columns=columns,
             rows=[[timestamp, "prompt_tokens", "claims-portal", 12.0]],
         )
-
-        def fake_client(credential):
-            return SimpleNamespace(
-                query_resource=lambda *args, **kwargs: SimpleNamespace(tables=[table])
-            )
-
-        monitor_query = SimpleNamespace(LogsQueryClient=fake_client)
+        monitor_query = self._fake_logs_client([table], calls if calls is not None else [])
         with (
             patch.dict("sys.modules", {"azure.monitor.query": monitor_query}),
             patch("shared.auth.get_credential", return_value=object()),
         ):
             return timestamp, apim.query_app_insights_token_metrics(
-                app_insights_resource_id=(
-                    "/subscriptions/sub/resourceGroups/rg"
-                    "/providers/Microsoft.Insights/components/appi"
-                ),
+                app_insights_resource_id=self.APP_INSIGHTS_ID,
                 metric_names=["prompt_tokens"],
+                **kwargs,
+            )
+
+    def test_query_token_metrics_reads_application_insights(self):
+        timestamp = object()
+        table = SimpleNamespace(
+            columns=["timestamp", "metric_name", "dimension_value", "total"],
+            rows=[[timestamp, "prompt_tokens", "claims-portal", 12.0]],
+        )
+        calls = []
+        monitor_query = self._fake_logs_client([table], calls)
+        with (
+            patch.dict("sys.modules", {"azure.monitor.query": monitor_query}),
+            patch("shared.auth.get_credential", return_value=object()),
+            patch.object(
+                apim,
+                "get_app_insights_for_apim",
+                return_value={"app_insights_resource_id": self.APP_INSIGHTS_ID},
+            ) as resolve,
+        ):
+            rows = apim.query_token_metrics(
+                resource_id=self.RESOURCE_ID,
+                metric_names=["prompt_tokens"],
+                subscription_filter="demo-sub",
+            )
+
+        resolve.assert_called_once_with("sub", "rg", "apim")
+        self.assertEqual(calls[0]["resource_id"], self.APP_INSIGHTS_ID)
+        self.assertIn("customMetrics", calls[0]["query"])
+        self.assertIn("'demo-sub'", calls[0]["query"])
+        self.assertNotIn("Microsoft.ResourceId", calls[0]["query"])
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "timestamp": timestamp,
+                    "metric_name": "prompt_tokens",
+                    "dimension_name": "ClientApp",
+                    "dimension_value": "claims-portal",
+                    "total": 12.0,
+                }
+            ],
+        )
+
+    def test_query_token_metrics_uses_explicit_app_insights_resource_id(self):
+        calls = []
+        monitor_query = self._fake_logs_client([], calls)
+        with (
+            patch.dict("sys.modules", {"azure.monitor.query": monitor_query}),
+            patch("shared.auth.get_credential", return_value=object()),
+            patch.object(
+                apim, "get_app_insights_for_apim", side_effect=AssertionError("no ARM call")
+            ),
+        ):
+            rows = apim.query_token_metrics(
+                resource_id=self.RESOURCE_ID,
+                metric_names=["prompt_tokens"],
+                app_insights_resource_id=self.APP_INSIGHTS_ID,
+            )
+
+        self.assertEqual(rows, [])
+        self.assertEqual(calls[0]["resource_id"], self.APP_INSIGHTS_ID)
+
+    def test_query_app_insights_token_metrics_returns_empty_list_without_rows(self):
+        empty_table = SimpleNamespace(
+            columns=["timestamp", "metric_name", "dimension_value", "total"], rows=[]
+        )
+        monitor_query = self._fake_logs_client([empty_table], [])
+        with (
+            patch.dict("sys.modules", {"azure.monitor.query": monitor_query}),
+            patch("shared.auth.get_credential", return_value=object()),
+        ):
+            self.assertEqual(
+                apim.query_app_insights_token_metrics(
+                    app_insights_resource_id=self.APP_INSIGHTS_ID,
+                    metric_names=["prompt_tokens"],
+                ),
+                [],
             )
 
     def test_query_app_insights_token_metrics_accepts_string_columns(self):
@@ -350,18 +234,4 @@ class TokenMetricsTests(unittest.TestCase):
                     "total": 12.0,
                 }
             ],
-        )
-
-    def test_legacy_metadata_items_still_resolve_dimension(self):
-        timeseries = SimpleNamespace(
-            metadata_values=[
-                SimpleNamespace(name=SimpleNamespace(value="ClientApp"), value="analyst-copilot")
-            ]
-        )
-        self.assertEqual(
-            apim._metadata_dimension_value(timeseries, "ClientApp"), "analyst-copilot"
-        )
-        self.assertEqual(
-            apim._metadata_dimension_value(SimpleNamespace(metadata_values={}), "ClientApp"),
-            "unknown",
         )

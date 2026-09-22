@@ -115,7 +115,7 @@ class TokenMetricsTests(unittest.TestCase):
                     apim.resolve_metrics_region(self.RESOURCE_ID), "northeurope"
                 )
 
-    def _query_token_metrics(self, metadata_values=None, **kwargs):
+    def _query_token_metrics(self, metadata_values=None, side_effects=None, **kwargs):
         timestamp = object()
         timeseries = SimpleNamespace(
             metadata_values=metadata_values or {"ClientApp": "claims-portal"},
@@ -126,14 +126,23 @@ class TokenMetricsTests(unittest.TestCase):
         )
         metric = SimpleNamespace(name="prompt_tokens", timeseries=[timeseries])
         result = SimpleNamespace(metrics=[metric])
-        captured = {}
+        calls = []
+        endpoint_calls = []
 
         def query_resources(**kwargs):
-            captured.update(kwargs)
+            calls.append(kwargs)
+            if side_effects:
+                index = len(calls) - 1
+                if index < len(side_effects):
+                    effect = side_effects[index]
+                    if isinstance(effect, BaseException):
+                        raise effect
+                    if effect is not None:
+                        return effect
             return [result]
 
         def fake_client(endpoint, credential):
-            captured["endpoint"] = endpoint
+            endpoint_calls.append(endpoint)
             return SimpleNamespace(query_resources=query_resources)
 
         querymetrics = SimpleNamespace(
@@ -154,10 +163,14 @@ class TokenMetricsTests(unittest.TestCase):
                 **kwargs,
             )
 
-        return timestamp, captured, rows
+        filters = [call["filter"] for call in calls]
+        captured = dict(calls[-1]) if calls else {}
+        if endpoint_calls:
+            captured["endpoint"] = endpoint_calls[-1]
+        return timestamp, captured, rows, filters
 
     def test_query_token_metrics_uses_batch_client_and_keeps_row_shape(self):
-        timestamp, captured, rows = self._query_token_metrics(
+        timestamp, captured, rows, filters = self._query_token_metrics(
             subscription_filter="demo-sub"
         )
 
@@ -167,6 +180,7 @@ class TokenMetricsTests(unittest.TestCase):
             "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
             " and Subscription ID eq 'demo-sub'",
         )
+        self.assertEqual(len(filters), 1)
         self.assertEqual(
             rows,
             [
@@ -181,22 +195,24 @@ class TokenMetricsTests(unittest.TestCase):
         )
 
     def test_query_token_metrics_filters_resource_id_without_subscription(self):
-        _, captured, _ = self._query_token_metrics()
+        _, _, _, filters = self._query_token_metrics()
 
         self.assertEqual(
-            captured["filter"], "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
+            filters[0], "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
         )
+        self.assertEqual(len(filters), 1)
 
     def test_query_token_metrics_does_not_duplicate_resource_id_clause(self):
-        _, captured, _ = self._query_token_metrics(
+        _, captured, _, filters = self._query_token_metrics(
             dimension_name="Microsoft.ResourceId"
         )
 
         self.assertEqual(captured["filter"], "Microsoft.ResourceId eq '*'")
         self.assertEqual(captured["filter"].count("Microsoft.ResourceId"), 1)
+        self.assertEqual(len(filters), 1)
 
     def test_query_token_metrics_resolves_client_app_with_resource_id_metadata(self):
-        _, _, rows = self._query_token_metrics(
+        _, _, rows, _ = self._query_token_metrics(
             metadata_values={
                 "Microsoft.ResourceId": self.RESOURCE_ID,
                 "ClientApp": "claims-portal",
@@ -204,6 +220,71 @@ class TokenMetricsTests(unittest.TestCase):
         )
 
         self.assertEqual(rows[0]["dimension_value"], "claims-portal")
+
+    def test_query_token_metrics_retries_without_resource_id_on_rejection(self):
+        error = apim.ApimError(
+            "GET",
+            "https://example.test",
+            SimpleNamespace(
+                status_code=400,
+                text="Dimensions: microsoft.resourceid are invalid at Resource level",
+            ),
+        )
+        timestamp, captured, rows, filters = self._query_token_metrics(
+            subscription_filter="demo-sub",
+            side_effects=[error],
+        )
+
+        self.assertEqual(
+            filters,
+            [
+                "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
+                " and Subscription ID eq 'demo-sub'",
+                "ClientApp eq '*' and Subscription ID eq 'demo-sub'",
+            ],
+        )
+        self.assertEqual(
+            captured["filter"], "ClientApp eq '*' and Subscription ID eq 'demo-sub'"
+        )
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "timestamp": timestamp,
+                    "metric_name": "prompt_tokens",
+                    "dimension_name": "ClientApp",
+                    "dimension_value": "claims-portal",
+                    "total": 12.0,
+                }
+            ],
+        )
+
+    def test_query_token_metrics_propagates_unrelated_error_without_retry(self):
+        error = RuntimeError("throttled: too many requests")
+
+        with self.assertRaises(RuntimeError):
+            self._query_token_metrics(side_effects=[error])
+
+    def test_query_token_metrics_reraises_after_both_attempts_fail(self):
+        first_error = apim.ApimError(
+            "GET",
+            "https://example.test",
+            SimpleNamespace(
+                status_code=400,
+                text="Dimensions: microsoft.resourceid are invalid at Resource level",
+            ),
+        )
+        second_error = apim.ApimError(
+            "GET",
+            "https://example.test",
+            SimpleNamespace(
+                status_code=400,
+                text="Dimensions: microsoft.resourceid not a valid dimension",
+            ),
+        )
+
+        with self.assertRaises(apim.ApimError):
+            self._query_token_metrics(side_effects=[first_error, second_error])
 
     def _query_app_insights_token_metrics(self, columns):
         timestamp = object()

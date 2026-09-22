@@ -178,6 +178,26 @@ class TokenMetricsTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(calls[0]["resource_id"], self.APP_INSIGHTS_ID)
 
+    def test_query_token_metrics_raises_when_app_insights_cannot_be_resolved(self):
+        with patch.object(apim, "get_app_insights_for_apim", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "Application Insights"):
+                apim.query_token_metrics(
+                    resource_id=self.RESOURCE_ID, metric_names=["prompt_tokens"]
+                )
+
+    def test_app_insights_resolution_ignores_malformed_resource_ids(self):
+        with patch.object(
+            apim, "get_app_insights_for_apim", side_effect=AssertionError("no ARM call")
+        ):
+            for malformed in (
+                "",
+                "/subscriptions/sub/resourceGroups/service",
+                "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Insights/components/appi",
+            ):
+                self.assertIsNone(
+                    apim._app_insights_for_apim_resource_id(malformed), malformed
+                )
+
     def test_query_app_insights_token_metrics_returns_empty_list_without_rows(self):
         empty_table = SimpleNamespace(
             columns=["timestamp", "metric_name", "dimension_value", "total"], rows=[]

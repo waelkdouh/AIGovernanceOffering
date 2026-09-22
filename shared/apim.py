@@ -622,12 +622,24 @@ def _app_insights_for_apim_resource_id(resource_id: str) -> Optional[str]:
     """Resolve the App Insights component wired to an APIM service resource id."""
     parts = [part for part in resource_id.split("/") if part]
     lowered = [part.lower() for part in parts]
-    try:
-        subscription_id = parts[lowered.index("subscriptions") + 1]
-        resource_group = parts[lowered.index("resourcegroups") + 1]
-        apim_name = parts[lowered.index("service") + 1]
-    except (ValueError, IndexError):
+    expected = [
+        "subscriptions",
+        None,
+        "resourcegroups",
+        None,
+        "providers",
+        "microsoft.apimanagement",
+        "service",
+        None,
+    ]
+    if len(parts) < len(expected):
         return None
+    if any(
+        segment is not None and lowered[index] != segment
+        for index, segment in enumerate(expected)
+    ):
+        return None
+    subscription_id, resource_group, apim_name = parts[1], parts[3], parts[7]
     logger = get_app_insights_for_apim(subscription_id, resource_group, apim_name)
     return (logger or {}).get("app_insights_resource_id")
 

@@ -56,6 +56,7 @@ class EnsureLoggerTests(unittest.TestCase):
                     "apim",
                     "logger",
                     app_insights_resource_id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Insights/components/appi",
+                    app_insights_connection_string=None,
                 )
 
         request.assert_not_called()

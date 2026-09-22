@@ -355,18 +355,16 @@ def ensure_logger(
     resource_group: str,
     apim_name: str,
     logger_id: str,
+    *,
+    app_insights_connection_string: str,
     app_insights_resource_id: Optional[str] = None,
-    app_insights_connection_string: Optional[str] = None,
     description: str = "",
 ) -> Dict[str, Any]:
     """Create or update an APIM Application Insights logger.
 
-    Provide an Application Insights connection string, optionally with the
-    resource id as the Azure resource backing the logger.
-    ``app_insights_connection_string`` is mandatory for a valid APIM
-    Application Insights logger; it remains optional in the signature only so
-    missing configuration can fail with the actionable error below. APIM
-    requires non-empty credentials on Application Insights loggers, even when
+    Provide the required Application Insights connection string, optionally with
+    the resource id as the Azure resource backing the logger. APIM requires
+    non-empty credentials on Application Insights loggers, even when
     ``resourceId`` is supplied.
     """
     if not (app_insights_connection_string or "").strip():

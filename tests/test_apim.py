@@ -115,10 +115,10 @@ class TokenMetricsTests(unittest.TestCase):
                     apim.resolve_metrics_region(self.RESOURCE_ID), "northeurope"
                 )
 
-    def test_query_token_metrics_uses_batch_client_and_keeps_row_shape(self):
+    def _query_token_metrics(self, metadata_values=None, **kwargs):
         timestamp = object()
         timeseries = SimpleNamespace(
-            metadata_values={"ClientApp": "claims-portal"},
+            metadata_values=metadata_values or {"ClientApp": "claims-portal"},
             data=[
                 SimpleNamespace(timestamp=timestamp, total=12.0),
                 SimpleNamespace(timestamp=timestamp, total=None),
@@ -151,12 +151,21 @@ class TokenMetricsTests(unittest.TestCase):
             rows = apim.query_token_metrics(
                 resource_id=self.RESOURCE_ID,
                 metric_names=["prompt_tokens"],
-                subscription_filter="demo-sub",
+                **kwargs,
             )
+
+        return timestamp, captured, rows
+
+    def test_query_token_metrics_uses_batch_client_and_keeps_row_shape(self):
+        timestamp, captured, rows = self._query_token_metrics(
+            subscription_filter="demo-sub"
+        )
 
         self.assertEqual(captured["resource_ids"], [self.RESOURCE_ID])
         self.assertEqual(
-            captured["filter"], "ClientApp eq '*' and Subscription ID eq 'demo-sub'"
+            captured["filter"],
+            "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
+            " and Subscription ID eq 'demo-sub'",
         )
         self.assertEqual(
             rows,
@@ -170,6 +179,31 @@ class TokenMetricsTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_query_token_metrics_filters_resource_id_without_subscription(self):
+        _, captured, _ = self._query_token_metrics()
+
+        self.assertEqual(
+            captured["filter"], "ClientApp eq '*' and Microsoft.ResourceId eq '*'"
+        )
+
+    def test_query_token_metrics_does_not_duplicate_resource_id_clause(self):
+        _, captured, _ = self._query_token_metrics(
+            dimension_name="Microsoft.ResourceId"
+        )
+
+        self.assertEqual(captured["filter"], "Microsoft.ResourceId eq '*'")
+        self.assertEqual(captured["filter"].count("Microsoft.ResourceId"), 1)
+
+    def test_query_token_metrics_resolves_client_app_with_resource_id_metadata(self):
+        _, _, rows = self._query_token_metrics(
+            metadata_values={
+                "Microsoft.ResourceId": self.RESOURCE_ID,
+                "ClientApp": "claims-portal",
+            }
+        )
+
+        self.assertEqual(rows[0]["dimension_value"], "claims-portal")
 
     def _query_app_insights_token_metrics(self, columns):
         timestamp = object()

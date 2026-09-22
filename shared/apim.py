@@ -374,6 +374,7 @@ def ensure_logger(
             "Set APP_INSIGHTS_CONNECTION_STRING from the Application Insights "
             "resource's Overview blade before calling ensure_logger."
         )
+    app_insights_resource_id = (app_insights_resource_id or "").strip()
 
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/loggers/{logger_id}"
     properties: Dict[str, Any] = {

@@ -164,6 +164,10 @@ out loud:
   or the notebook has enough `APP_INSIGHTS_*` values to create one.
 - **LLM API logging enabled**: the Demo 2 API diagnostic has LLM /
   large-language-model logging settings.
+- **Support custom metrics enabled**: the Demo 2 API diagnostic has
+  `metrics: true`. Without it the token metrics emitted by the policy are
+  silently discarded. The Configure section always sets it, so re-run that
+  section if the verify step reports it as disabled.
 - **Custom metrics with dimensions enabled**: App Insights **Enable alerting
   on custom metric dimensions** / usage-and-estimated-costs setting. If ARM
   cannot detect the setting, the notebook shows a clear manual portal

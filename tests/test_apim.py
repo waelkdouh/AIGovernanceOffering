@@ -42,6 +42,95 @@ class ApimPolicyTests(unittest.TestCase):
             ["base"],
         )
 
+    def test_demo3_content_safety_is_configured_in_both_directions(self):
+        policy_path = (
+            Path(__file__).resolve().parents[1]
+            / "policies"
+            / "demo3-content-safety.xml"
+        )
+        policy = ET.parse(policy_path).getroot()
+
+        inbound = policy.find("./inbound/llm-content-safety")
+        self.assertIsNotNone(inbound)
+        self.assertEqual(inbound.attrib["backend-id"], "demo3-content-safety-backend")
+        self.assertEqual(inbound.attrib["shield-prompt"], "true")
+        self.assertEqual(inbound.attrib["enforce-on-completions"], "true")
+
+        inbound_categories = inbound.find("categories")
+        self.assertIsNotNone(inbound_categories)
+        self.assertEqual(inbound_categories.attrib["output-type"], "EightSeverityLevels")
+        self.assertEqual(
+            {c.attrib["name"] for c in inbound_categories.findall("category")},
+            {"Hate", "SelfHarm", "Sexual", "Violence"},
+        )
+        for category in inbound_categories.findall("category"):
+            self.assertEqual(
+                category.attrib["threshold"],
+                f"{{{{demo3-content-safety-threshold-{category.attrib['name'].lower()}}}}}",
+            )
+
+        outbound = policy.find("./outbound/llm-content-safety")
+        self.assertIsNotNone(outbound)
+        self.assertEqual(outbound.attrib["backend-id"], "demo3-content-safety-backend")
+        self.assertIn("window-size", outbound.attrib)
+        self.assertIn("window-overlap-size", outbound.attrib)
+        # enforce-on-completions only affects inbound and is ignored outbound,
+        # so it should not be present here.
+        self.assertNotIn("enforce-on-completions", outbound.attrib)
+
+        on_error_choose = policy.find("./on-error/choose")
+        self.assertIsNotNone(on_error_choose)
+        self.assertIn(
+            "llm-content-safety",
+            on_error_choose.find("when").attrib["condition"],
+        )
+
+
+class EnsureBackendTests(unittest.TestCase):
+    def test_put_body_omits_credentials_when_not_supplied(self):
+        response = SimpleNamespace(status_code=200, content=b"{}", text="{}")
+
+        with patch.object(apim, "_request", return_value=response) as request:
+            apim.ensure_backend(
+                "sub",
+                "rg",
+                "apim",
+                "demo3-openai-backend",
+                "https://example.openai.azure.com",
+            )
+
+        properties = request.call_args.kwargs["json_body"]["properties"]
+        self.assertNotIn("credentials", properties)
+
+    def test_put_body_includes_managed_identity_credentials(self):
+        response = SimpleNamespace(status_code=200, content=b"{}", text="{}")
+
+        with patch.object(apim, "_request", return_value=response) as request:
+            apim.ensure_backend(
+                "sub",
+                "rg",
+                "apim",
+                "demo3-content-safety-backend",
+                "https://example.cognitiveservices.azure.com",
+                credentials={
+                    "managedIdentity": {
+                        "resource": "https://cognitiveservices.azure.com"
+                    }
+                },
+            )
+
+        self.assertEqual(request.call_args.args[0], "PUT")
+        self.assertTrue(
+            request.call_args.args[1].endswith(
+                "/backends/demo3-content-safety-backend"
+            )
+        )
+        properties = request.call_args.kwargs["json_body"]["properties"]
+        self.assertEqual(
+            properties["credentials"]["managedIdentity"]["resource"],
+            "https://cognitiveservices.azure.com",
+        )
+
 
 class EnsureLoggerTests(unittest.TestCase):
     def test_requires_connection_string_even_with_resource_id(self):

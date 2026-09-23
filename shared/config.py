@@ -22,7 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / ".env"
 
 # Fields that should never be echoed back in plain text.
-SECRET_FIELDS = {"aoai_key", "app_insights_connection_string"}
+SECRET_FIELDS = {"aoai_key", "app_insights_connection_string", "content_safety_key"}
+
+# Default severity threshold (0-7, EightSeverityLevels) applied to each of the
+# four llm-content-safety categories when not overridden. Choosing this value
+# is a Responsible AI business decision, not an engineering default -- see
+# Demo 3.
+DEFAULT_CONTENT_SAFETY_THRESHOLD = "4"
 
 # Supported Azure OpenAI request surfaces:
 #   "v1"      -> Microsoft Foundry / v1 surface: POST /openai/v1/chat/completions
@@ -46,6 +52,13 @@ class WorkshopConfig:
     app_insights_name: Optional[str] = None
     app_insights_resource_id: Optional[str] = None
     app_insights_connection_string: Optional[str] = None
+    content_safety_endpoint: str = ""
+    content_safety_key: Optional[str] = None
+    content_safety_blocklist_id: Optional[str] = None
+    content_safety_threshold_hate: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
+    content_safety_threshold_selfharm: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
+    content_safety_threshold_sexual: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
+    content_safety_threshold_violence: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
     demo_run: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     def as_display_dict(self) -> Dict[str, str]:
@@ -69,6 +82,13 @@ _ENV_KEYS = {
     "app_insights_name": "APP_INSIGHTS_NAME",
     "app_insights_resource_id": "APP_INSIGHTS_RESOURCE_ID",
     "app_insights_connection_string": "APP_INSIGHTS_CONNECTION_STRING",
+    "content_safety_endpoint": "CONTENT_SAFETY_ENDPOINT",
+    "content_safety_key": "CONTENT_SAFETY_KEY",
+    "content_safety_blocklist_id": "CONTENT_SAFETY_BLOCKLIST_ID",
+    "content_safety_threshold_hate": "CONTENT_SAFETY_THRESHOLD_HATE",
+    "content_safety_threshold_selfharm": "CONTENT_SAFETY_THRESHOLD_SELFHARM",
+    "content_safety_threshold_sexual": "CONTENT_SAFETY_THRESHOLD_SEXUAL",
+    "content_safety_threshold_violence": "CONTENT_SAFETY_THRESHOLD_VIOLENCE",
     "demo_run": "DEMO_RUN",
 }
 
@@ -118,6 +138,24 @@ def load_config(interactive: bool = True) -> WorkshopConfig:
     cfg.app_insights_resource_id = os.environ.get("APP_INSIGHTS_RESOURCE_ID") or None
     cfg.app_insights_connection_string = (
         os.environ.get("APP_INSIGHTS_CONNECTION_STRING") or None
+    )
+    cfg.content_safety_endpoint = os.environ.get("CONTENT_SAFETY_ENDPOINT", "")
+    cfg.content_safety_key = os.environ.get("CONTENT_SAFETY_KEY") or None
+    cfg.content_safety_blocklist_id = os.environ.get("CONTENT_SAFETY_BLOCKLIST_ID") or None
+    cfg.content_safety_threshold_hate = (
+        os.environ.get("CONTENT_SAFETY_THRESHOLD_HATE", "") or cfg.content_safety_threshold_hate
+    )
+    cfg.content_safety_threshold_selfharm = (
+        os.environ.get("CONTENT_SAFETY_THRESHOLD_SELFHARM", "")
+        or cfg.content_safety_threshold_selfharm
+    )
+    cfg.content_safety_threshold_sexual = (
+        os.environ.get("CONTENT_SAFETY_THRESHOLD_SEXUAL", "")
+        or cfg.content_safety_threshold_sexual
+    )
+    cfg.content_safety_threshold_violence = (
+        os.environ.get("CONTENT_SAFETY_THRESHOLD_VIOLENCE", "")
+        or cfg.content_safety_threshold_violence
     )
     cfg.demo_run = os.environ.get("DEMO_RUN", "") or cfg.demo_run
 
@@ -219,3 +257,65 @@ def validate_config(cfg: WorkshopConfig) -> None:
             f"'{parsed.path}' path segment; the notebooks append the correct "
             "request path themselves."
         )
+
+
+def ensure_content_safety_config(cfg: WorkshopConfig, interactive: bool = True) -> WorkshopConfig:
+    """Prompt for (and persist) the Demo 3 Azure AI Content Safety values.
+
+    Content Safety is only required starting with Demo 3, so -- unlike the
+    core AOAI fields in :func:`load_config` -- these values are not prompted
+    for on every notebook run. Demo 3 calls this explicitly during its
+    config/preflight section; Demos 1 and 2 never call it and are unaffected.
+    """
+    if not cfg.content_safety_endpoint and interactive:
+        cfg.content_safety_endpoint = _prompt(
+            "content_safety_endpoint",
+            "Azure AI Content Safety endpoint (e.g. https://<name>.cognitiveservices.azure.com)",
+        )
+        _persist("content_safety_endpoint", cfg.content_safety_endpoint)
+
+    if cfg.content_safety_key is None and interactive and "CONTENT_SAFETY_KEY" not in _dotenv_keys():
+        answer = _prompt(
+            "content_safety_key",
+            "Azure AI Content Safety API key (leave blank to use managed identity)",
+            secret=True,
+        )
+        cfg.content_safety_key = answer or None
+        _persist("content_safety_key", cfg.content_safety_key or "")
+
+    return cfg
+
+
+def validate_content_safety_config(cfg: WorkshopConfig) -> None:
+    """Raise a clear error if the Demo 3 Content Safety endpoint is missing/malformed."""
+    if not cfg.content_safety_endpoint:
+        raise ValueError(
+            "Missing required configuration value: content_safety_endpoint. Set "
+            "CONTENT_SAFETY_ENDPOINT in .env, or run the Demo 3 config cell "
+            "interactively."
+        )
+
+    parsed = urlparse(cfg.content_safety_endpoint)
+    if parsed.path not in ("", "/"):
+        raise ValueError(
+            "CONTENT_SAFETY_ENDPOINT must be the resource root (e.g. "
+            "https://<name>.cognitiveservices.azure.com) without a path -- got "
+            f"'{cfg.content_safety_endpoint}'. Remove the '{parsed.path}' path "
+            "segment; the notebook appends the correct request path itself."
+        )
+
+    for name, value in (
+        ("content_safety_threshold_hate", cfg.content_safety_threshold_hate),
+        ("content_safety_threshold_selfharm", cfg.content_safety_threshold_selfharm),
+        ("content_safety_threshold_sexual", cfg.content_safety_threshold_sexual),
+        ("content_safety_threshold_violence", cfg.content_safety_threshold_violence),
+    ):
+        try:
+            threshold = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be an integer 0-7 (got {value!r}).")
+        if not 0 <= threshold <= 7:
+            raise ValueError(
+                f"{name} must be between 0 (most restrictive) and 7 (least "
+                f"restrictive) on the EightSeverityLevels scale (got {threshold})."
+            )

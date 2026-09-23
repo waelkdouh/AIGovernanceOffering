@@ -1,0 +1,121 @@
+<policies>
+  <inbound>
+    <base />
+    <set-backend-service backend-id="demo3-openai-backend" />
+    <!--
+      Backend authentication: the Azure OpenAI / Microsoft Foundry resource has
+      key authentication disabled, so APIM authenticates with its managed
+      identity and forwards the resulting bearer token to the backend. Grant
+      the APIM identity the 'Cognitive Services OpenAI User' role on the AI
+      resource. (If an API key is supplied instead, the notebook swaps this
+      block for an 'api-key' header sourced from the demo3-aoai-key named
+      value.)
+    -->
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com"
+        output-token-variable-name="aoai-token" ignore-error="false" />
+    <set-header name="Authorization" exists-action="override">
+      <value>@("Bearer " + (string)context.Variables["aoai-token"])</value>
+    </set-header>
+
+    <!--
+      Content safety - inbound half: prompt checks. llm-content-safety calls
+      the Content Safety backend directly (auth for that call is configured
+      on the demo3-content-safety-backend entity itself - managed identity
+      with resource https://cognitiveservices.azure.com by default, or an
+      Ocp-Apim-Subscription-Key header when the notebook is given a
+      CONTENT_SAFETY_KEY). shield-prompt="true" enables prompt-injection /
+      jailbreak detection; enforce-on-completions="true" additionally asks
+      this same inbound instance to validate the eventual (non-streaming)
+      completion. The four category thresholds run 0-7 on the
+      EightSeverityLevels scale and are sourced from named values so they can
+      be tuned - as a Responsible AI business decision - without editing
+      this XML.
+    -->
+    <llm-content-safety backend-id="demo3-content-safety-backend"
+        shield-prompt="true"
+        enforce-on-completions="true">
+      <categories output-type="EightSeverityLevels">
+        <category name="Hate" threshold="{{demo3-content-safety-threshold-hate}}" />
+        <category name="SelfHarm" threshold="{{demo3-content-safety-threshold-selfharm}}" />
+        <category name="Sexual" threshold="{{demo3-content-safety-threshold-sexual}}" />
+        <category name="Violence" threshold="{{demo3-content-safety-threshold-violence}}" />
+      </categories>
+      <!--
+        Optional blocklist: create a blocklist in Azure AI Content Safety
+        Studio, set its id as the demo3-content-safety-blocklist-id named
+        value, and uncomment the block below to also block exact-match terms
+        regardless of severity score.
+      <blocklists>
+        <id>{{demo3-content-safety-blocklist-id}}</id>
+      </blocklists>
+      -->
+    </llm-content-safety>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <!--
+      Content safety - outbound half: completion checks. APIM explicitly
+      supports using llm-content-safety more than once per policy document;
+      this second instance inspects the model's actual completion using the
+      same category thresholds. window-size / window-overlap-size are only
+      configurable here (for responses) - they control how much completion
+      text is buffered and re-checked as it streams. enforce-on-completions
+      is intentionally omitted: it only affects the *inbound* instance, and
+      it is ignored when llm-content-safety is placed in <outbound>.
+
+      Streaming limitation (documented, not a bug): per Microsoft's docs, for
+      streaming responses the policy buffers a sliding window of events and,
+      on a violation, silently stops forwarding further events to the
+      client - it does not raise a 403/on-error for that case. The notebook
+      therefore verifies the streaming case by observing that the stream
+      ends early (no trailing "[DONE]" event), not by checking a status code.
+    -->
+    <llm-content-safety backend-id="demo3-content-safety-backend"
+        window-size="1000"
+        window-overlap-size="100">
+      <categories output-type="EightSeverityLevels">
+        <category name="Hate" threshold="{{demo3-content-safety-threshold-hate}}" />
+        <category name="SelfHarm" threshold="{{demo3-content-safety-threshold-selfharm}}" />
+        <category name="Sexual" threshold="{{demo3-content-safety-threshold-sexual}}" />
+        <category name="Violence" threshold="{{demo3-content-safety-threshold-violence}}" />
+      </categories>
+    </llm-content-safety>
+  </outbound>
+  <on-error>
+    <base />
+    <!--
+      Surface a clear, evidence-friendly 403 when llm-content-safety blocks a
+      (non-streaming) request or response: context.LastError.Source is
+      "llm-content-safety" for both the prompt-shield and category-threshold
+      cases, so the notebook's test matrix can tell blocks apart from other
+      failures via the x-content-safety-decision / x-content-safety-reason
+      response headers and the JSON body below.
+    -->
+    <choose>
+      <when condition='@(context.LastError != null &amp;&amp; context.LastError.Source == "llm-content-safety")'>
+        <return-response>
+          <set-status code="403" reason="Forbidden" />
+          <set-header name="Content-Type" exists-action="override">
+            <value>application/json</value>
+          </set-header>
+          <set-header name="x-content-safety-decision" exists-action="override">
+            <value>blocked</value>
+          </set-header>
+          <set-header name="x-content-safety-reason" exists-action="override">
+            <value>@(context.LastError.Reason ?? "content_safety_violation")</value>
+          </set-header>
+          <set-body>@{
+            return new JObject(
+              new JProperty("error", "content_safety_violation"),
+              new JProperty("reason", context.LastError.Reason ?? "content_safety_violation"),
+              new JProperty("message", context.LastError.Message ?? "Blocked by the Demo 3 content safety policy.")
+            ).ToString();
+          }</set-body>
+        </return-response>
+      </when>
+    </choose>
+  </on-error>
+</policies>

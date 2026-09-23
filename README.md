@@ -23,6 +23,12 @@ policies, and then demonstrate the resulting behavior live.
     `Cognitive Services OpenAI User` role on the Azure OpenAI resource
     (preferred), or
   - an Azure OpenAI API key (used as a fallback).
+- **For Demo 3 only:** an **Azure AI Content Safety** resource (kind
+  "Content Safety"), and either:
+  - the APIM system-assigned managed identity granted the
+    `Cognitive Services User` role on the Content Safety resource
+    (preferred), or
+  - a Content Safety API key (used as a fallback).
 
 ### APIM SKU requirements
 
@@ -39,6 +45,10 @@ OpenAI-compatible APIs, Anthropic, and Vertex AI. It provides both TPM rate
 limiting and long-term quotas through `token-quota` and
 `token-quota-period`, returning 429 for TPM bursts and 403 for quota
 exhaustion. It is also the focus of Microsoft's AI Gateway investment.
+
+Demo 3's **`llm-content-safety`** policy is supported on the same set of
+tiers (Developer, Basic, Basic v2, Standard, Standard v2, Premium, Premium
+v2), not on Consumption.
 
 ## Getting started
 
@@ -75,7 +85,7 @@ always masked in notebook output and are never printed in full.
 | - | -------- | ----- | ------ |
 | 1 | [`demo1-token-limits.ipynb`](notebooks/demo1-token-limits.ipynb) | Token limits & quota enforcement (TPM burst -> 429, daily budget -> 403) | **Complete** |
 | 2 | [`demo2-token-metrics.ipynb`](notebooks/demo2-token-metrics.ipynb) | Token metering & chargeback dimensions | **Complete** |
-| 3 | [`demo3-placeholder.ipynb`](notebooks/demo3-placeholder.ipynb) | TBD | Coming soon |
+| 3 | [`demo3-content-safety.ipynb`](notebooks/demo3-content-safety.ipynb) | Content safety - inspect both directions | **Complete** |
 | 4 | [`demo4-placeholder.ipynb`](notebooks/demo4-placeholder.ipynb) | TBD | Coming soon |
 
 Every demo notebook follows the same template, so new demos can be dropped
@@ -96,13 +106,16 @@ shared/
   apim.py                      # idempotent APIM control-plane helpers (ARM REST)
   auth.py                      # AzureCliCredential / DefaultAzureCredential helpers + ARM token
   display.py                   # tables, headers, banners, charts
+  fixtures.py                  # versioned Demo 3 content-safety test-matrix fixtures
 policies/
   demo1-token-limit.xml        # API-scope policy for Demo 1
+  demo2-emit-token-metric.xml  # API-scope policy for Demo 2
+  demo3-content-safety.xml     # API-scope policy for Demo 3 (inbound + outbound)
 notebooks/
   00-setup-and-validation.ipynb  # shared prerequisite check
   demo1-token-limits.ipynb       # Demo 1 (complete)
   demo2-token-metrics.ipynb      # Demo 2 (complete)
-  demo3-placeholder.ipynb        # stub
+  demo3-content-safety.ipynb     # Demo 3 (complete)
   demo4-placeholder.ipynb        # stub
 ```
 
@@ -190,3 +203,77 @@ Demo 2 also includes the streaming caveat from the workshop deck: request
 token usage from the provider when supported
 (`stream_options: {"include_usage": true}`), and remember that interrupted
 streams can produce incomplete counts.
+
+## Demo 3: Content safety - inspect both directions
+
+Demo 3 builds on the **same APIM instance** and Azure OpenAI / Microsoft
+Foundry backend values used in Demos 1 and 2. It additionally requires a new
+**Azure AI Content Safety** resource (kind "Content Safety") and, if you are
+not supplying a key, an APIM managed-identity role assignment on it (see
+Prerequisites above).
+
+Demo 3 creates only Demo 3-scoped APIM resources on the existing instance:
+
+1. A dedicated product (`demo3-content-safety`) and subscription
+   (`demo3-content-safety-sub`) for isolation.
+2. A dedicated API (`demo3-content-safety-api` at path
+   `/demo3-content-safety`), the Azure OpenAI backend
+   (`demo3-openai-backend`), a new Content Safety backend
+   (`demo3-content-safety-backend`), and the `chat-completions` operation.
+3. Named values for the four category thresholds (`Hate`, `SelfHarm`,
+   `Sexual`, `Violence`, default `4`), an optional blocklist id, and optional
+   `demo3-aoai-key` / `demo3-content-safety-key` keys.
+4. An API-scope policy (`policies/demo3-content-safety.xml`) applying the
+   `llm-content-safety` policy **twice**: once **inbound** and once
+   **outbound**.
+
+**Content safety is one policy in two directions:**
+
+- **Inbound - prompt checks:** `shield-prompt="true"` detects prompt
+  injection / jailbreak attempts, and the four category checks
+  (`<categories output-type="EightSeverityLevels">`) block prompts whose
+  harm score meets or exceeds the configured threshold.
+  `enforce-on-completions="true"` additionally validates the eventual
+  (non-streaming) completion from the same inbound instance.
+- **Outbound - completion checks:** a second `llm-content-safety` instance in
+  `<outbound>` re-checks the actual completion with `window-size` /
+  `window-overlap-size`, which are only configurable for responses. **Stress
+  this half out loud: models can produce unsafe content even from perfectly
+  benign prompts**, so an inbound-only check is not sufficient.
+
+Severity thresholds run **0-7** on the `EightSeverityLevels` scale across
+`Hate`, `SelfHarm`, `Sexual`, and `Violence`. **Choosing a threshold is a
+business decision, not an engineering default** -- involve your Responsible
+AI reviewers before changing the defaults (`CONTENT_SAFETY_THRESHOLD_*` in
+`.env`, default `4` for all four).
+
+The notebook drives the workshop deck's test matrix and renders it with
+`display.show_table` (Case / Input / Expected / Actual+Evidence):
+
+| Case | Input | Expected | Evidence |
+| --- | --- | --- | --- |
+| Safe business prompt | Approved benign fixture | `200` | Request + completion pass |
+| Prompt attack | Approved injection fixture | `403` | Prompt shield blocks |
+| Harm threshold | Approved severity >= 4 fixture | `403` | Category policy blocks |
+| Streaming completion | Controlled stub fixture | `STREAM STOPS` | No later events forwarded |
+
+On a `403`, the policy's `<on-error>` handling (keyed on
+`context.LastError.Source == "llm-content-safety"`) returns a clear JSON body
+plus `x-content-safety-decision` / `x-content-safety-reason` response
+headers as evidence. For the **streaming** case, Microsoft's documented
+behavior is that a detected violation makes APIM **stop forwarding further
+events to the client without returning a 403** -- the notebook demonstrates
+this by showing the stream end early, with no trailing `[DONE]` event.
+
+> **Demo safety rule:** use versioned, pre-approved fixtures from your own
+> evaluation set (`shared/fixtures.py`, version-stamped via
+> `FIXTURE_SET_VERSION`). **Never improvise "harmful" examples live** -- it is
+> a compliance risk and it makes results unrepeatable. The fixtures shipped
+> here are deliberately mild, non-graphic, clearly-labelled placeholders that
+> exercise the mechanism only; substitute your own organization's
+> pre-approved evaluation-set fixtures before using this in a real workshop.
+
+Demo 3 leaves its APIM resources in place -- Demo 4 reuses the same APIM
+instance, so cleanup is covered at the end of the final demo. Re-running
+`demo3-content-safety.ipynb` end to end, twice in a row, does not fail or
+duplicate any Azure resources.

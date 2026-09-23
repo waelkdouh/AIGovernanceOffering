@@ -183,6 +183,7 @@ def ensure_backend(
     backend_url: str,
     description: str = "",
     protocol: str = "http",
+    credentials: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Create or update (idempotent) a backend pointing at the AOAI endpoint.
 
@@ -192,6 +193,13 @@ def ensure_backend(
     in ``backend_url``. APIM's REST contract does not accept ``"https"`` here.
     Public Azure endpoints should keep both TLS certificate validation flags
     enabled.
+
+    ``credentials`` is used by backends whose auth is configured on the
+    backend entity itself rather than via a policy ``set-header`` (this is
+    how the ``llm-content-safety`` policy authenticates to its Content Safety
+    ``backend-id``, since it calls the backend directly). Pass e.g.
+    ``{"managedIdentity": {"resource": "https://cognitiveservices.azure.com"}}``
+    or ``{"header": {"Ocp-Apim-Subscription-Key": ["<key>"]}}``.
     """
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/backends/{backend_id}"
     body = {
@@ -202,6 +210,8 @@ def ensure_backend(
             "tls": {"validateCertificateChain": True, "validateCertificateName": True},
         }
     }
+    if credentials:
+        body["properties"]["credentials"] = credentials
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
     return _json_body(response)

@@ -233,8 +233,10 @@ def ensure_backend_pool(
     Uses the module's APIM API version, which supports both Pool backends and
     the circuit breaker properties used by Demo 4.
     """
-    if not members or any(not member.get("id") for member in members):
-        raise ValueError("Pool members must contain at least one backend id.")
+    if not members:
+        raise ValueError("Pool must contain at least one member.")
+    if any(not member.get("id") for member in members):
+        raise ValueError("Every pool member must specify a backend 'id'.")
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/backends/{backend_id}"
     body = {
         "properties": {
@@ -910,11 +912,9 @@ def delete_apim_resource_if_exists(
     response = _request(
         "DELETE", url, ok_statuses=[200, 202, 204, 404]
     )
-    if response.status_code in (200, 202, 204, 404):
-        if response.status_code != 404:
-            _wait_for_completion(response)
-        return response.status_code != 404
-    raise ApimError("DELETE", response.url, response)
+    if response.status_code != 404:
+        _wait_for_completion(response)
+    return response.status_code != 404
 
 
 def get_service(subscription_id: str, resource_group: str, apim_name: str) -> Dict[str, Any]:

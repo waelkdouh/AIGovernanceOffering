@@ -126,7 +126,7 @@ notebooks/
   demo1-token-limits.ipynb       # Demo 1 (complete)
   demo2-token-metrics.ipynb      # Demo 2 (complete)
   demo3-content-safety.ipynb     # Demo 3 (complete)
-  demo4-resilient-pool.ipynb      # Demo 4 (complete)
+  demo4-resilient-pool.ipynb     # Demo 4 (complete)
 ```
 
 ## Named value convention

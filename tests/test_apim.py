@@ -163,6 +163,22 @@ class EnsureBackendTests(unittest.TestCase):
         self.assertEqual(properties["pool"]["services"], members)
 
 
+class DeleteApimResourceTests(unittest.TestCase):
+    def test_missing_resource_does_not_wait_for_completion(self):
+        response = SimpleNamespace(status_code=404)
+        with (
+            patch.object(apim, "_request", return_value=response) as request,
+            patch.object(apim, "_wait_for_completion") as wait,
+        ):
+            deleted = apim.delete_apim_resource_if_exists(
+                "sub", "rg", "apim", "backends/demo4-ptu-east"
+            )
+
+        self.assertFalse(deleted)
+        self.assertEqual(request.call_args.args[0], "DELETE")
+        wait.assert_not_called()
+
+
 class EnsureLoggerTests(unittest.TestCase):
     def test_requires_connection_string_even_with_resource_id(self):
         for connection_string in (None, "   "):

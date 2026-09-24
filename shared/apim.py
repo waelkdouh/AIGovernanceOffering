@@ -230,8 +230,8 @@ def ensure_backend_pool(
 ) -> Dict[str, Any]:
     """Create or update a Pool backend from backend id, priority, and weight members.
 
-    Uses the ``2024-06-01-preview`` ARM contract, which supports both Pool
-    backends and the circuit breaker properties used by Demo 4.
+    Uses the module's APIM API version, which supports both Pool backends and
+    the circuit breaker properties used by Demo 4.
     """
     if not members or any(not member.get("id") for member in members):
         raise ValueError("Pool members must contain at least one backend id.")
@@ -907,11 +907,12 @@ def delete_apim_resource_if_exists(
     ``"backends/demo4-aoai-pool"`` or ``"products/demo4-resilient-pool"``.
     """
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/{resource_path.lstrip('/')}"
-    response = requests.delete(
-        url, headers=_headers(), params={"api-version": API_VERSION}, timeout=60
+    response = _request(
+        "DELETE", url, ok_statuses=[200, 202, 204, 404]
     )
     if response.status_code in (200, 202, 204, 404):
-        _wait_for_completion(response)
+        if response.status_code != 404:
+            _wait_for_completion(response)
         return response.status_code != 404
     raise ApimError("DELETE", response.url, response)
 

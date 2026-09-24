@@ -169,12 +169,25 @@ def load_config(interactive: bool = True) -> WorkshopConfig:
         os.environ.get("CONTENT_SAFETY_THRESHOLD_VIOLENCE", "")
         or cfg.content_safety_threshold_violence
     )
-    cfg.demo4_ptu_east_endpoint = os.environ.get("DEMO4_PTU_EAST_ENDPOINT", "")
-    cfg.demo4_ptu_central_endpoint = os.environ.get("DEMO4_PTU_CENTRAL_ENDPOINT", "")
-    cfg.demo4_payg_endpoint = os.environ.get("DEMO4_PAYG_ENDPOINT", "")
-    cfg.demo4_ptu_east_deployment = os.environ.get("DEMO4_PTU_EAST_DEPLOYMENT", "")
-    cfg.demo4_ptu_central_deployment = os.environ.get("DEMO4_PTU_CENTRAL_DEPLOYMENT", "")
-    cfg.demo4_payg_deployment = os.environ.get("DEMO4_PAYG_DEPLOYMENT", "")
+    cfg.demo4_ptu_east_endpoint = (
+        os.environ.get("DEMO4_PTU_EAST_ENDPOINT", "") or cfg.demo4_ptu_east_endpoint
+    )
+    cfg.demo4_ptu_central_endpoint = (
+        os.environ.get("DEMO4_PTU_CENTRAL_ENDPOINT", "") or cfg.demo4_ptu_central_endpoint
+    )
+    cfg.demo4_payg_endpoint = (
+        os.environ.get("DEMO4_PAYG_ENDPOINT", "") or cfg.demo4_payg_endpoint
+    )
+    cfg.demo4_ptu_east_deployment = (
+        os.environ.get("DEMO4_PTU_EAST_DEPLOYMENT", "") or cfg.demo4_ptu_east_deployment
+    )
+    cfg.demo4_ptu_central_deployment = (
+        os.environ.get("DEMO4_PTU_CENTRAL_DEPLOYMENT", "")
+        or cfg.demo4_ptu_central_deployment
+    )
+    cfg.demo4_payg_deployment = (
+        os.environ.get("DEMO4_PAYG_DEPLOYMENT", "") or cfg.demo4_payg_deployment
+    )
     cfg.demo_run = os.environ.get("DEMO_RUN", "") or cfg.demo_run
 
     if not interactive:

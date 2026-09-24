@@ -1,0 +1,24 @@
+<policies>
+  <inbound>
+    <base />
+    <!-- The pool selector, not this policy, chooses a healthy member on every call. -->
+    <set-backend-service backend-id="demo4-aoai-pool" />
+    <authentication-managed-identity resource="https://cognitiveservices.azure.com" />
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+    <!-- APIM does not expose the selected pool member in policy context. Use gateway diagnostics for it. -->
+    <set-header name="x-demo4-routing" exists-action="override">
+      <value>pool-selector</value>
+    </set-header>
+  </outbound>
+  <on-error>
+    <base />
+    <set-header name="x-demo4-routing" exists-action="override">
+      <value>pool-selector-error</value>
+    </set-header>
+  </on-error>
+</policies>

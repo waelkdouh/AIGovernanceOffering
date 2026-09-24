@@ -85,6 +85,21 @@ class ApimPolicyTests(unittest.TestCase):
             on_error_choose.find("when").attrib["condition"],
         )
 
+    def test_demo4_routes_to_the_pool(self):
+        policy_path = (
+            Path(__file__).resolve().parents[1]
+            / "policies"
+            / "demo4-resilient-pool.xml"
+        )
+        policy = ET.parse(policy_path).getroot()
+        backend = policy.find("./inbound/set-backend-service")
+        self.assertIsNotNone(backend)
+        self.assertEqual(backend.attrib["backend-id"], "demo4-aoai-pool")
+        self.assertIsNotNone(policy.find("./inbound/authentication-managed-identity"))
+        self.assertEqual(
+            policy.find("./outbound/set-header").attrib["name"], "x-demo4-routing"
+        )
+
 
 class EnsureBackendTests(unittest.TestCase):
     def test_put_body_omits_credentials_when_not_supplied(self):
@@ -130,6 +145,22 @@ class EnsureBackendTests(unittest.TestCase):
             properties["credentials"]["managedIdentity"]["resource"],
             "https://cognitiveservices.azure.com",
         )
+
+    def test_put_body_includes_circuit_breaker(self):
+        response = SimpleNamespace(status_code=200, content=b"{}", text="{}")
+        breaker = {"rules": [{"name": "demo4-throttle-and-server-errors"}]}
+        with patch.object(apim, "_request", return_value=response) as request:
+            apim.ensure_backend("sub", "rg", "apim", "demo4-ptu-east", "https://example.test", circuit_breaker=breaker)
+        self.assertEqual(request.call_args.kwargs["json_body"]["properties"]["circuitBreaker"], breaker)
+
+    def test_pool_backend_uses_pool_contract(self):
+        response = SimpleNamespace(status_code=200, content=b"{}", text="{}")
+        members = [{"id": "demo4-ptu-east", "priority": 1, "weight": 2}]
+        with patch.object(apim, "_request", return_value=response) as request:
+            apim.ensure_backend_pool("sub", "rg", "apim", "demo4-aoai-pool", members)
+        properties = request.call_args.kwargs["json_body"]["properties"]
+        self.assertEqual(properties["type"], "Pool")
+        self.assertEqual(properties["pool"]["services"], members)
 
 
 class EnsureLoggerTests(unittest.TestCase):

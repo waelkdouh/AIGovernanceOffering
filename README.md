@@ -199,8 +199,8 @@ Acceptance criteria displayed in the notebook:
 - **PASS 02:** Prompt + completion reconcile to total.
 - **PASS 03:** Subscription filters cleanly isolate chargeback.
 
-Demo 2 also includes the streaming caveat from the workshop deck: request
-token usage from the provider when supported
+Demo 2 also includes the streaming caveat: request token usage from the
+provider when supported
 (`stream_options: {"include_usage": true}`), and remember that interrupted
 streams can produce incomplete counts.
 
@@ -247,7 +247,7 @@ business decision, not an engineering default** -- involve your Responsible
 AI reviewers before changing the defaults (`CONTENT_SAFETY_THRESHOLD_*` in
 `.env`, default `4` for all four).
 
-The notebook drives the workshop deck's test matrix and renders it with
+The notebook drives the test matrix and renders it with
 `display.show_table` (Case / Input / Expected / Actual+Evidence):
 
 | Case | Input | Expected | Evidence |
@@ -256,6 +256,13 @@ The notebook drives the workshop deck's test matrix and renders it with
 | Prompt attack | Approved injection fixture | `403` | Prompt shield blocks |
 | Harm threshold | Approved severity >= 4 fixture | `403` | Category policy blocks |
 | Streaming completion | Controlled stub fixture | `STREAM STOPS` | No later events forwarded |
+
+> The shipped harm-category and streaming fixtures are deliberately mild and
+> may not trip a default threshold. If a row reports **NOT TRIPPED**, substitute
+> your organization's pre-approved evaluation-set fixture or lower the relevant
+> `CONTENT_SAFETY_THRESHOLD_*` value toward the low end of the 0-7 scale for the
+> demonstration. Production thresholds remain a Responsible AI business
+> decision, not an engineering default.
 
 On a `403`, the policy's `<on-error>` handling (keyed on
 `context.LastError.Source == "llm-content-safety"`) returns a clear JSON body

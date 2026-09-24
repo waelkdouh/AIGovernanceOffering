@@ -20,8 +20,7 @@ from typing import Any, Dict
 # saved evidence can be traced back to the exact fixture text that produced it.
 FIXTURE_SET_VERSION = "2025-01-demo3-v1"
 
-# Matches the M8.15 "Test matrix, not toxic improvisation" slide: Case / Input
-# (fixture) / Expected / Evidence.
+# Test matrix shape: Case / Input (fixture) / Expected / Evidence.
 DEMO3_FIXTURES: Dict[str, Dict[str, Any]] = {
     "safe_business_prompt": {
         "case": "Safe business prompt",

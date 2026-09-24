@@ -235,8 +235,15 @@ def ensure_backend_pool(
     """
     if not members:
         raise ValueError("Pool must contain at least one member.")
-    if any(not member.get("id") for member in members):
-        raise ValueError("Every pool member must specify a backend 'id'.")
+    for member in members:
+        if not member.get("id"):
+            raise ValueError("Every pool member must specify a backend 'id'.")
+        for field_name in ("priority", "weight"):
+            value = member.get(field_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(
+                    f"Pool member {member['id']!r} {field_name} must be a positive integer."
+                )
     url = f"{_service_scope(subscription_id, resource_group, apim_name)}/backends/{backend_id}"
     body = {
         "properties": {

@@ -24,6 +24,11 @@ class ResilientPoolConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must match"):
             config.validate_resilient_pool_config(cfg)
 
+    def test_pool_rejects_missing_or_invalid_endpoint(self):
+        cfg = config.WorkshopConfig(aoai_deployment="gpt-4o")
+        with self.assertRaisesRegex(ValueError, "non-empty HTTPS"):
+            config.validate_resilient_pool_config(cfg)
+
 
 def _base_cfg(**overrides) -> config.WorkshopConfig:
     cfg = config.WorkshopConfig(

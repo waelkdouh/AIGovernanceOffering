@@ -162,6 +162,12 @@ class EnsureBackendTests(unittest.TestCase):
         self.assertEqual(properties["type"], "Pool")
         self.assertEqual(properties["pool"]["services"], members)
 
+    def test_pool_backend_requires_positive_priority_and_weight(self):
+        with self.assertRaisesRegex(ValueError, "priority"):
+            apim.ensure_backend_pool(
+                "sub", "rg", "apim", "pool", [{"id": "member", "priority": 0, "weight": 1}]
+            )
+
 
 class DeleteApimResourceTests(unittest.TestCase):
     def test_missing_resource_does_not_wait_for_completion(self):

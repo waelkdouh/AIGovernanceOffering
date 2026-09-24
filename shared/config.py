@@ -403,8 +403,15 @@ def validate_resilient_pool_config(cfg: WorkshopConfig) -> None:
     ):
         value = getattr(cfg, name) or cfg.aoai_endpoint
         parsed = urlparse(value)
-        if parsed.path not in ("", "/"):
-            raise ValueError(f"{name} must be an Azure OpenAI resource root, not {value!r}.")
+        if (
+            not value
+            or parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.path not in ("", "/")
+        ):
+            raise ValueError(
+                f"{name} must be a non-empty HTTPS Azure OpenAI resource root, not {value!r}."
+            )
     deployments = {
         cfg.demo4_ptu_east_deployment or cfg.aoai_deployment,
         cfg.demo4_ptu_central_deployment or cfg.aoai_deployment,
@@ -413,5 +420,6 @@ def validate_resilient_pool_config(cfg: WorkshopConfig) -> None:
     if len(deployments) != 1:
         raise ValueError(
             "Demo 4 pool deployments must match across PTU East, PTU Central, and "
-            "PAYG. Use the same model and version to avoid silent model drift."
+            f"PAYG (found: {', '.join(sorted(deployments))}). Use the same model and "
+            "version to avoid silent model drift."
         )

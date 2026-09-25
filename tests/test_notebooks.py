@@ -11,6 +11,7 @@ NOTEBOOKS = [
     ROOT / "notebooks" / "demo1-token-limits.ipynb",
     ROOT / "notebooks" / "demo2-token-metrics.ipynb",
     ROOT / "notebooks" / "demo3-content-safety.ipynb",
+    ROOT / "notebooks" / "demo4-resilient-pool.ipynb",
 ]
 DISPLAY_HELPERS = {
     "show_table",
@@ -54,7 +55,9 @@ class NotebookContentTests(unittest.TestCase):
             self.assertIsNone(pattern.search(content), str(path.relative_to(ROOT)))
 
     def test_demo3_documents_not_tripped_outcome(self):
-        notebook = json.loads(NOTEBOOKS[-1].read_text(encoding="utf-8"))
+        notebook = json.loads(
+            (ROOT / "notebooks" / "demo3-content-safety.ipynb").read_text(encoding="utf-8")
+        )
         source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
         self.assertIn("NOT TRIPPED", source)
         self.assertIn("CONTENT_SAFETY_THRESHOLD_VIOLENCE", source)

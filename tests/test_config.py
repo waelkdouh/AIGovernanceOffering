@@ -4,6 +4,32 @@ from dataclasses import replace
 from shared import config
 
 
+class ResilientPoolConfigTests(unittest.TestCase):
+    def test_pool_defaults_to_primary_values(self):
+        cfg = config.WorkshopConfig(
+            aoai_endpoint="https://example.openai.azure.com",
+            aoai_deployment="gpt-4o",
+        )
+        config.ensure_resilient_pool_config(cfg, interactive=False)
+        self.assertEqual(cfg.demo4_ptu_east_endpoint, cfg.aoai_endpoint)
+        self.assertEqual(cfg.demo4_payg_deployment, cfg.aoai_deployment)
+
+    def test_pool_rejects_mismatched_deployments(self):
+        cfg = config.WorkshopConfig(
+            aoai_endpoint="https://example.openai.azure.com",
+            aoai_deployment="gpt-4o",
+            demo4_ptu_east_deployment="gpt-4o",
+            demo4_ptu_central_deployment="another-model",
+        )
+        with self.assertRaisesRegex(ValueError, "must match"):
+            config.validate_resilient_pool_config(cfg)
+
+    def test_pool_rejects_missing_or_invalid_endpoint(self):
+        cfg = config.WorkshopConfig(aoai_deployment="gpt-4o")
+        with self.assertRaisesRegex(ValueError, "non-empty HTTPS"):
+            config.validate_resilient_pool_config(cfg)
+
+
 def _base_cfg(**overrides) -> config.WorkshopConfig:
     cfg = config.WorkshopConfig(
         resource_group="rg",

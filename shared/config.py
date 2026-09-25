@@ -59,6 +59,12 @@ class WorkshopConfig:
     content_safety_threshold_selfharm: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
     content_safety_threshold_sexual: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
     content_safety_threshold_violence: str = DEFAULT_CONTENT_SAFETY_THRESHOLD
+    demo4_ptu_east_endpoint: str = ""
+    demo4_ptu_central_endpoint: str = ""
+    demo4_payg_endpoint: str = ""
+    demo4_ptu_east_deployment: str = ""
+    demo4_ptu_central_deployment: str = ""
+    demo4_payg_deployment: str = ""
     demo_run: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
 
     def as_display_dict(self) -> Dict[str, str]:
@@ -89,6 +95,12 @@ _ENV_KEYS = {
     "content_safety_threshold_selfharm": "CONTENT_SAFETY_THRESHOLD_SELFHARM",
     "content_safety_threshold_sexual": "CONTENT_SAFETY_THRESHOLD_SEXUAL",
     "content_safety_threshold_violence": "CONTENT_SAFETY_THRESHOLD_VIOLENCE",
+    "demo4_ptu_east_endpoint": "DEMO4_PTU_EAST_ENDPOINT",
+    "demo4_ptu_central_endpoint": "DEMO4_PTU_CENTRAL_ENDPOINT",
+    "demo4_payg_endpoint": "DEMO4_PAYG_ENDPOINT",
+    "demo4_ptu_east_deployment": "DEMO4_PTU_EAST_DEPLOYMENT",
+    "demo4_ptu_central_deployment": "DEMO4_PTU_CENTRAL_DEPLOYMENT",
+    "demo4_payg_deployment": "DEMO4_PAYG_DEPLOYMENT",
     "demo_run": "DEMO_RUN",
 }
 
@@ -156,6 +168,25 @@ def load_config(interactive: bool = True) -> WorkshopConfig:
     cfg.content_safety_threshold_violence = (
         os.environ.get("CONTENT_SAFETY_THRESHOLD_VIOLENCE", "")
         or cfg.content_safety_threshold_violence
+    )
+    cfg.demo4_ptu_east_endpoint = (
+        os.environ.get("DEMO4_PTU_EAST_ENDPOINT", "") or cfg.demo4_ptu_east_endpoint
+    )
+    cfg.demo4_ptu_central_endpoint = (
+        os.environ.get("DEMO4_PTU_CENTRAL_ENDPOINT", "") or cfg.demo4_ptu_central_endpoint
+    )
+    cfg.demo4_payg_endpoint = (
+        os.environ.get("DEMO4_PAYG_ENDPOINT", "") or cfg.demo4_payg_endpoint
+    )
+    cfg.demo4_ptu_east_deployment = (
+        os.environ.get("DEMO4_PTU_EAST_DEPLOYMENT", "") or cfg.demo4_ptu_east_deployment
+    )
+    cfg.demo4_ptu_central_deployment = (
+        os.environ.get("DEMO4_PTU_CENTRAL_DEPLOYMENT", "")
+        or cfg.demo4_ptu_central_deployment
+    )
+    cfg.demo4_payg_deployment = (
+        os.environ.get("DEMO4_PAYG_DEPLOYMENT", "") or cfg.demo4_payg_deployment
     )
     cfg.demo_run = os.environ.get("DEMO_RUN", "") or cfg.demo_run
 
@@ -319,3 +350,76 @@ def validate_content_safety_config(cfg: WorkshopConfig) -> None:
                 f"{name} must be between 0 (most restrictive) and 7 (least "
                 f"restrictive) on the EightSeverityLevels scale (got {threshold})."
             )
+
+
+def ensure_resilient_pool_config(
+    cfg: WorkshopConfig, interactive: bool = True
+) -> WorkshopConfig:
+    """Collect optional Demo 4 pool origins, defaulting each to the primary AOAI origin.
+
+    The optional values let a presenter demonstrate a real multi-region pool.
+    Empty values intentionally fall back to the Demo 1 Azure OpenAI endpoint
+    and deployment so attendees with one resource can still run the demo.
+    """
+    fields = (
+        ("demo4_ptu_east_endpoint", "PTU East Azure OpenAI endpoint (blank = AOAI_ENDPOINT)"),
+        ("demo4_ptu_central_endpoint", "PTU Central Azure OpenAI endpoint (blank = AOAI_ENDPOINT)"),
+        ("demo4_payg_endpoint", "PAYG Azure OpenAI endpoint (blank = AOAI_ENDPOINT)"),
+        ("demo4_ptu_east_deployment", "PTU East deployment name (blank = AOAI_DEPLOYMENT)"),
+        ("demo4_ptu_central_deployment", "PTU Central deployment name (blank = AOAI_DEPLOYMENT)"),
+        ("demo4_payg_deployment", "PAYG deployment name (blank = AOAI_DEPLOYMENT)"),
+    )
+    dotenv_keys = _dotenv_keys()
+    for field_name, label in fields:
+        env_key = _ENV_KEYS[field_name]
+        if interactive and not getattr(cfg, field_name) and env_key not in dotenv_keys:
+            value = _prompt(field_name, label)
+            setattr(cfg, field_name, value)
+            _persist(field_name, value)
+
+    for field_name in (
+        "demo4_ptu_east_endpoint",
+        "demo4_ptu_central_endpoint",
+        "demo4_payg_endpoint",
+    ):
+        if not getattr(cfg, field_name):
+            setattr(cfg, field_name, cfg.aoai_endpoint)
+    for field_name in (
+        "demo4_ptu_east_deployment",
+        "demo4_ptu_central_deployment",
+        "demo4_payg_deployment",
+    ):
+        if not getattr(cfg, field_name):
+            setattr(cfg, field_name, cfg.aoai_deployment)
+    return cfg
+
+
+def validate_resilient_pool_config(cfg: WorkshopConfig) -> None:
+    """Validate Demo 4 pool roots and enforce the same-model/version rule."""
+    for name in (
+        "demo4_ptu_east_endpoint",
+        "demo4_ptu_central_endpoint",
+        "demo4_payg_endpoint",
+    ):
+        value = getattr(cfg, name) or cfg.aoai_endpoint
+        parsed = urlparse(value)
+        if (
+            not value
+            or parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.path not in ("", "/")
+        ):
+            raise ValueError(
+                f"{name} must be a non-empty HTTPS Azure OpenAI resource root, not {value!r}."
+            )
+    deployments = {
+        cfg.demo4_ptu_east_deployment or cfg.aoai_deployment,
+        cfg.demo4_ptu_central_deployment or cfg.aoai_deployment,
+        cfg.demo4_payg_deployment or cfg.aoai_deployment,
+    }
+    if len(deployments) != 1:
+        raise ValueError(
+            "Demo 4 pool deployments must match across PTU East, PTU Central, and "
+            f"PAYG (found: {', '.join(sorted(deployments))}). Use the same model and "
+            "version to avoid silent model drift."
+        )

@@ -29,6 +29,11 @@ policies, and then demonstrate the resulting behavior live.
     `Cognitive Services User` role on the Content Safety resource
     (preferred), or
   - a Content Safety API key (used as a fallback).
+- **For Demo 4:** an APIM SKU supporting backend pools and circuit breakers:
+  **Basic v2, Standard v2, Premium v2, or classic Standard/Premium**. Extra
+  Azure OpenAI endpoints are optional; without them the notebook uses one
+  origin as three logical members. All pool members must use the **same model
+  and version** to avoid silent model drift.
 
 ### APIM SKU requirements
 
@@ -49,6 +54,10 @@ exhaustion. It is also the focus of Microsoft's AI Gateway investment.
 Demo 3's **`llm-content-safety`** policy is supported on the same set of
 tiers (Developer, Basic, Basic v2, Standard, Standard v2, Premium, Premium
 v2), not on Consumption.
+
+Demo 4's backend pool and circuit-breaker support is limited to **Basic v2,
+Standard v2, Premium v2, classic Standard, and classic Premium**. It is not
+available on Consumption, Developer, or classic Basic.
 
 ## Getting started
 
@@ -86,7 +95,7 @@ always masked in notebook output and are never printed in full.
 | 1 | [`demo1-token-limits.ipynb`](notebooks/demo1-token-limits.ipynb) | Token limits & quota enforcement (TPM burst -> 429, daily budget -> 403) | **Complete** |
 | 2 | [`demo2-token-metrics.ipynb`](notebooks/demo2-token-metrics.ipynb) | Token metering & chargeback dimensions | **Complete** |
 | 3 | [`demo3-content-safety.ipynb`](notebooks/demo3-content-safety.ipynb) | Content safety - inspect both directions | **Complete** |
-| 4 | [`demo4-placeholder.ipynb`](notebooks/demo4-placeholder.ipynb) | TBD | Coming soon |
+| 4 | [`demo4-resilient-pool.ipynb`](notebooks/demo4-resilient-pool.ipynb) | Resilient backend pools -- priority/weight routing, circuit breakers, spillover | **Complete** |
 
 Every demo notebook follows the same template, so new demos can be dropped
 in without changing the `shared/` helpers:
@@ -111,12 +120,13 @@ policies/
   demo1-token-limit.xml        # API-scope policy for Demo 1
   demo2-emit-token-metric.xml  # API-scope policy for Demo 2
   demo3-content-safety.xml     # API-scope policy for Demo 3 (inbound + outbound)
+  demo4-resilient-pool.xml     # API-scope policy for Demo 4 pool routing
 notebooks/
   00-setup-and-validation.ipynb  # shared prerequisite check
   demo1-token-limits.ipynb       # Demo 1 (complete)
   demo2-token-metrics.ipynb      # Demo 2 (complete)
   demo3-content-safety.ipynb     # Demo 3 (complete)
-  demo4-placeholder.ipynb        # stub
+  demo4-resilient-pool.ipynb     # Demo 4 (complete)
 ```
 
 ## Named value convention
@@ -284,3 +294,33 @@ Demo 3 leaves its APIM resources in place -- Demo 4 reuses the same APIM
 instance, so cleanup is covered at the end of the final demo. Re-running
 `demo3-content-safety.ipynb` end to end, twice in a row, does not fail or
 duplicate any Azure resources.
+
+## Demo 4: Resilient backend pools
+
+Demo 4 reuses the same APIM instance and Azure OpenAI / Microsoft Foundry
+configuration from Demos 1-3. It creates only Demo 4-scoped resources:
+
+1. Three backends: `demo4-ptu-east`, `demo4-ptu-central`, and `demo4-payg`.
+   Each has a circuit breaker that trips on 429 and 5xx responses and honors
+   an origin `Retry-After`.
+2. A `demo4-aoai-pool` Pool backend with East and Central at priority 1
+   (weights 2 and 1), then PAYG at priority 2 for spillover.
+3. A dedicated API (`demo4-resilient-pool-api`), product, subscription, and
+   optional `demo4-aoai-key` named value.
+4. An API-scope policy whose single
+   `<set-backend-service backend-id="demo4-aoai-pool" />` line delegates
+   selection to APIM.
+
+The notebook preflights APIM reachability, the required SKU, Azure OpenAI
+configuration, and the same-model/version rule. It makes a baseline call,
+explains the expected approximately 2:1 priority-1 distribution, and uses
+gateway diagnostics rather than fabricating a selected-member header. It then
+temporarily points the priority-1 members to a failing origin to demonstrate
+circuit-breaker spillover to PAYG, restoring the original URLs in `finally`.
+
+Routing is a **per-call** priority -> weight -> health decision; a circuit-open
+member is removed from selection. Keep identical model and version deployments
+across every member, or otherwise successful calls can silently drift. The
+final section offers a clearly gated, optional cleanup of Demo 1-4 APIs,
+products, subscriptions, backends, named values, loggers, and diagnostics
+while leaving the APIM instance intact.

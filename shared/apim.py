@@ -184,6 +184,7 @@ def ensure_backend(
     description: str = "",
     protocol: str = "http",
     credentials: Optional[Dict[str, Any]] = None,
+    circuit_breaker: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Create or update (idempotent) a backend pointing at the AOAI endpoint.
 
@@ -212,6 +213,45 @@ def ensure_backend(
     }
     if credentials:
         body["properties"]["credentials"] = credentials
+    if circuit_breaker:
+        body["properties"]["circuitBreaker"] = circuit_breaker
+    response = _request("PUT", url, json_body=body)
+    _wait_for_completion(response)
+    return _json_body(response)
+
+
+def ensure_backend_pool(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    backend_id: str,
+    members: List[Dict[str, Any]],
+    description: str = "",
+) -> Dict[str, Any]:
+    """Create or update a Pool backend from backend id, priority, and weight members.
+
+    Uses the module's APIM API version, which supports both Pool backends and
+    the circuit breaker properties used by Demo 4.
+    """
+    if not members:
+        raise ValueError("Pool must contain at least one member.")
+    for member in members:
+        if not member.get("id"):
+            raise ValueError("Every pool member must specify a backend 'id'.")
+        for field_name in ("priority", "weight"):
+            value = member.get(field_name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise ValueError(
+                    f"Pool member {member['id']!r} {field_name} must be a positive integer."
+                )
+    url = f"{_service_scope(subscription_id, resource_group, apim_name)}/backends/{backend_id}"
+    body = {
+        "properties": {
+            "type": "Pool",
+            "description": description or backend_id,
+            "pool": {"services": members},
+        }
+    }
     response = _request("PUT", url, json_body=body)
     _wait_for_completion(response)
     return _json_body(response)
@@ -862,6 +902,26 @@ def delete_named_value_if_exists(
     if response.status_code in (200, 202, 204, 404):
         return response.status_code != 404
     raise ApimError("DELETE", response.url, response)
+
+
+def delete_apim_resource_if_exists(
+    subscription_id: str,
+    resource_group: str,
+    apim_name: str,
+    resource_path: str,
+) -> bool:
+    """Delete an APIM child resource by path, tolerating 404 for repeatable cleanup.
+
+    ``resource_path`` is relative to the APIM service, for example
+    ``"backends/demo4-aoai-pool"`` or ``"products/demo4-resilient-pool"``.
+    """
+    url = f"{_service_scope(subscription_id, resource_group, apim_name)}/{resource_path.lstrip('/')}"
+    response = _request(
+        "DELETE", url, ok_statuses=[200, 202, 204, 404]
+    )
+    if response.status_code != 404:
+        _wait_for_completion(response)
+    return response.status_code != 404
 
 
 def get_service(subscription_id: str, resource_group: str, apim_name: str) -> Dict[str, Any]:

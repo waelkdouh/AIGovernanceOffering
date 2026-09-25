@@ -304,7 +304,10 @@ configuration from Demos 1-3. It creates only Demo 4-scoped resources:
    Each has a circuit breaker that trips on 429 and 5xx responses and honors
    an origin `Retry-After`.
 2. A `demo4-aoai-pool` Pool backend with East and Central at priority 1
-   (weights 2 and 1), then PAYG at priority 2 for spillover.
+   (weights 2 and 1), then PAYG at priority 2 for spillover. APIM requires
+   each `pool.services[].id` to be the backend's ARM resource id
+   (`/subscriptions/.../service/{apim}/backends/{name}`), not its short name;
+   `apim.ensure_backend_pool` accepts short names and expands them.
 3. A dedicated API (`demo4-resilient-pool-api`), product, subscription, and
    optional `demo4-aoai-key` named value.
 4. An API-scope policy whose single

@@ -153,20 +153,91 @@ class EnsureBackendTests(unittest.TestCase):
             apim.ensure_backend("sub", "rg", "apim", "demo4-ptu-east", "https://example.test", circuit_breaker=breaker)
         self.assertEqual(request.call_args.kwargs["json_body"]["properties"]["circuitBreaker"], breaker)
 
-    def test_pool_backend_uses_pool_contract(self):
+    BACKENDS_ARM_PATH = (
+        "/subscriptions/sub/resourceGroups/rg"
+        "/providers/Microsoft.ApiManagement/service/apim/backends"
+    )
+
+    def _pool_services(self, members):
         response = SimpleNamespace(status_code=200, content=b"{}", text="{}")
-        members = [{"id": "demo4-ptu-east", "priority": 1, "weight": 2}]
         with patch.object(apim, "_request", return_value=response) as request:
             apim.ensure_backend_pool("sub", "rg", "apim", "demo4-aoai-pool", members)
+        self.assertEqual(request.call_args.args[0], "PUT")
+        self.assertEqual(
+            request.call_args.args[1],
+            f"{apim.ARM_BASE}{self.BACKENDS_ARM_PATH}/demo4-aoai-pool",
+        )
         properties = request.call_args.kwargs["json_body"]["properties"]
         self.assertEqual(properties["type"], "Pool")
-        self.assertEqual(properties["pool"]["services"], members)
+        self.assertNotIn("url", properties)
+        self.assertNotIn("protocol", properties)
+        return properties["pool"]["services"]
+
+    def test_pool_backend_uses_arm_ids_for_short_member_names(self):
+        services = self._pool_services([
+            {"id": "demo4-ptu-east", "priority": 1, "weight": 2},
+            {"id": "demo4-ptu-central", "priority": 1, "weight": 1},
+            {"id": "demo4-payg", "priority": 2, "weight": 1},
+        ])
+        self.assertEqual(
+            [service["id"] for service in services],
+            [
+                f"{self.BACKENDS_ARM_PATH}/demo4-ptu-east",
+                f"{self.BACKENDS_ARM_PATH}/demo4-ptu-central",
+                f"{self.BACKENDS_ARM_PATH}/demo4-payg",
+            ],
+        )
+
+    def test_pool_backend_does_not_double_prefix_qualified_ids(self):
+        arm_id = f"{self.BACKENDS_ARM_PATH}/demo4-ptu-east"
+        services = self._pool_services([
+            {"id": arm_id, "priority": 1, "weight": 2},
+            {"id": f"{apim.ARM_BASE}{arm_id}", "priority": 1, "weight": 1},
+        ])
+        self.assertEqual([service["id"] for service in services], [arm_id, arm_id])
+
+    def test_pool_backend_preserves_priority_weight_without_extra_keys(self):
+        members = [
+            {"id": "demo4-ptu-east", "priority": 1, "weight": 2, "endpoint": "x"},
+            {"id": "demo4-payg", "priority": 2, "weight": 1},
+        ]
+        services = self._pool_services(members)
+        self.assertEqual(
+            services,
+            [
+                {"id": f"{self.BACKENDS_ARM_PATH}/demo4-ptu-east", "priority": 1, "weight": 2},
+                {"id": f"{self.BACKENDS_ARM_PATH}/demo4-payg", "priority": 2, "weight": 1},
+            ],
+        )
+        self.assertEqual(members[0]["id"], "demo4-ptu-east")
+        self.assertIn("endpoint", members[0])
 
     def test_pool_backend_requires_positive_priority_and_weight(self):
         with self.assertRaisesRegex(ValueError, "priority"):
             apim.ensure_backend_pool(
                 "sub", "rg", "apim", "pool", [{"id": "member", "priority": 0, "weight": 1}]
             )
+
+    def test_pool_backend_validation_errors(self):
+        invalid_members = [
+            [],
+            [{"priority": 1, "weight": 1}],
+            [{"id": "", "priority": 1, "weight": 1}],
+            [{"id": "member", "priority": 1, "weight": 0}],
+            [{"id": "member", "priority": -1, "weight": 1}],
+            [{"id": "member", "priority": 1.5, "weight": 1}],
+            [{"id": "member", "priority": 1, "weight": "2"}],
+            [{"id": "member", "priority": True, "weight": 1}],
+            [{"id": "member", "priority": 1}],
+        ]
+        for members in invalid_members:
+            with self.subTest(members=members):
+                with (
+                    patch.object(apim, "_request") as request,
+                    self.assertRaises(ValueError),
+                ):
+                    apim.ensure_backend_pool("sub", "rg", "apim", "pool", members)
+                request.assert_not_called()
 
 
 class DeleteApimResourceTests(unittest.TestCase):

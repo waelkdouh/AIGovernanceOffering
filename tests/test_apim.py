@@ -100,6 +100,43 @@ class ApimPolicyTests(unittest.TestCase):
             policy.find("./outbound/set-header").attrib["name"], "x-demo4-routing"
         )
 
+    def test_demo4_mock_origin_policy_exposes_member_and_throttle(self):
+        policy_path = (
+            Path(__file__).resolve().parents[1]
+            / "policies"
+            / "demo4-mock-origin.xml"
+        )
+        policy = ET.parse(policy_path).getroot()
+
+        responses = policy.findall(".//return-response")
+        self.assertGreaterEqual(len(responses), 6)
+        served_by_values = [
+            header.findtext("value")
+            for response in responses
+            for header in response.findall("set-header")
+            if header.attrib.get("name") == "x-served-by"
+        ]
+        self.assertEqual(
+            set(served_by_values),
+            {"demo4-ptu-east", "demo4-ptu-central", "demo4-payg"},
+        )
+        throttles = [
+            response for response in responses
+            if response.find("set-status") is not None
+            and response.find("set-status").attrib.get("code") == "429"
+        ]
+        self.assertEqual(len(throttles), 3)
+        for response in throttles:
+            retry_after = next(
+                header for header in response.findall("set-header")
+                if header.attrib.get("name") == "Retry-After"
+            )
+            self.assertIn("demo4-mock-retry-after-", retry_after.findtext("value"))
+        self.assertEqual(
+            policy.find("./inbound/choose/otherwise/return-response/set-status").attrib["code"],
+            "404",
+        )
+
 
 class EnsureBackendTests(unittest.TestCase):
     def test_put_body_omits_credentials_when_not_supplied(self):

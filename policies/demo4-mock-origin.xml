@@ -1,0 +1,85 @@
+<policies>
+  <inbound>
+    <base />
+    <choose>
+      <when condition="@(context.Operation.Id == &quot;east&quot; &amp;&amp; &quot;{{demo4-mock-fault-east}}&quot; == &quot;429&quot;)">
+        <return-response>
+          <set-status code="429" reason="Too Many Requests" />
+          <set-header name="Retry-After" exists-action="override">
+            <value>{{demo4-mock-retry-after-east}}</value>
+          </set-header>
+          <set-header name="x-served-by" exists-action="override">
+            <value>demo4-ptu-east</value>
+          </set-header>
+          <set-body>{"error":{"code":"demo4_mock_throttled","message":"Demo 4 mock East is throttled."}}</set-body>
+        </return-response>
+      </when>
+      <when condition="@(context.Operation.Id == &quot;central&quot; &amp;&amp; &quot;{{demo4-mock-fault-central}}&quot; == &quot;429&quot;)">
+        <return-response>
+          <set-status code="429" reason="Too Many Requests" />
+          <set-header name="Retry-After" exists-action="override">
+            <value>{{demo4-mock-retry-after-central}}</value>
+          </set-header>
+          <set-header name="x-served-by" exists-action="override">
+            <value>demo4-ptu-central</value>
+          </set-header>
+          <set-body>{"error":{"code":"demo4_mock_throttled","message":"Demo 4 mock Central is throttled."}}</set-body>
+        </return-response>
+      </when>
+      <when condition="@(context.Operation.Id == &quot;payg&quot; &amp;&amp; &quot;{{demo4-mock-fault-payg}}&quot; == &quot;429&quot;)">
+        <return-response>
+          <set-status code="429" reason="Too Many Requests" />
+          <set-header name="Retry-After" exists-action="override">
+            <value>{{demo4-mock-retry-after-payg}}</value>
+          </set-header>
+          <set-header name="x-served-by" exists-action="override">
+            <value>demo4-payg</value>
+          </set-header>
+          <set-body>{"error":{"code":"demo4_mock_throttled","message":"Demo 4 mock PAYG is throttled."}}</set-body>
+        </return-response>
+      </when>
+      <when condition="@(context.Operation.Id == &quot;east&quot;)">
+        <return-response>
+          <set-status code="200" reason="OK" />
+          <set-header name="x-served-by" exists-action="override">
+            <value>demo4-ptu-east</value>
+          </set-header>
+          <set-body>{"id":"demo4-mock-east","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Mock routing response from East."},"finish_reason":"stop"}]}</set-body>
+        </return-response>
+      </when>
+      <when condition="@(context.Operation.Id == &quot;central&quot;)">
+        <return-response>
+          <set-status code="200" reason="OK" />
+          <set-header name="x-served-by" exists-action="override">
+            <value>demo4-ptu-central</value>
+          </set-header>
+          <set-body>{"id":"demo4-mock-central","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Mock routing response from Central."},"finish_reason":"stop"}]}</set-body>
+        </return-response>
+      </when>
+      <when condition="@(context.Operation.Id == &quot;payg&quot;)">
+        <return-response>
+          <set-status code="200" reason="OK" />
+          <set-header name="x-served-by" exists-action="override">
+            <value>demo4-payg</value>
+          </set-header>
+          <set-body>{"id":"demo4-mock-payg","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Mock routing response from PAYG."},"finish_reason":"stop"}]}</set-body>
+        </return-response>
+      </when>
+      <otherwise>
+        <return-response>
+          <set-status code="404" reason="Not Found" />
+          <set-body>{"error":{"code":"demo4_mock_operation_not_found","message":"Unknown Demo 4 mock operation."}}</set-body>
+        </return-response>
+      </otherwise>
+    </choose>
+  </inbound>
+  <backend>
+    <base />
+  </backend>
+  <outbound>
+    <base />
+  </outbound>
+  <on-error>
+    <base />
+  </on-error>
+</policies>

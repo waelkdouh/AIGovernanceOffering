@@ -121,6 +121,7 @@ policies/
   demo2-emit-token-metric.xml  # API-scope policy for Demo 2
   demo3-content-safety.xml     # API-scope policy for Demo 3 (inbound + outbound)
   demo4-resilient-pool.xml     # API-scope policy for Demo 4 pool routing
+  demo4-mock-origin.xml        # APIM-hosted observable mock origin for Demo 4
 notebooks/
   00-setup-and-validation.ipynb  # shared prerequisite check
   demo1-token-limits.ipynb       # Demo 1 (complete)
@@ -300,26 +301,42 @@ duplicate any Azure resources.
 Demo 4 reuses the same APIM instance and Azure OpenAI / Microsoft Foundry
 configuration from Demos 1-3. It creates only Demo 4-scoped resources:
 
-1. Three backends: `demo4-ptu-east`, `demo4-ptu-central`, and `demo4-payg`.
+1. An APIM-hosted mock-origin API (`demo4-mock-origin-api`) with East,
+   Central, and PAYG operations. It returns a chat-completions-shaped response
+   with an `x-served-by` member id, and named-value fault switches can make
+   one member return `429` with `Retry-After`. It uses the existing APIM
+   instance only, so no PTU capacity or extra Azure resource is required.
+2. Three backends: `demo4-ptu-east`, `demo4-ptu-central`, and `demo4-payg`.
    Each has a circuit breaker that trips on 429 and 5xx responses and honors
    an origin `Retry-After`.
-2. A `demo4-aoai-pool` Pool backend with East and Central at priority 1
+3. A `demo4-aoai-pool` Pool backend with East and Central at priority 1
    (weights 2 and 1), then PAYG at priority 2 for spillover. APIM requires
    each `pool.services[].id` to be the backend's ARM resource id
    (`/subscriptions/.../service/{apim}/backends/{name}`), not its short name;
    `apim.ensure_backend_pool` accepts short names and expands them.
-3. A dedicated API (`demo4-resilient-pool-api`), product, subscription, and
+4. A dedicated API (`demo4-resilient-pool-api`), product, subscription, and
    optional `demo4-aoai-key` named value.
-4. An API-scope policy whose single
+5. An API-scope policy whose single
    `<set-backend-service backend-id="demo4-aoai-pool" />` line delegates
    selection to APIM.
 
-The notebook preflights APIM reachability, the required SKU, Azure OpenAI
-configuration, and the same-model/version rule. It makes a baseline call,
-explains the expected approximately 2:1 priority-1 distribution, and uses
-gateway diagnostics rather than fabricating a selected-member header. It then
-temporarily points the priority-1 members to a failing origin to demonstrate
-circuit-breaker spillover to PAYG, restoring the original URLs in `finally`.
+The notebook has two explicit modes: **routing mode** points the pool at the
+mock members, while **inference mode** makes a baseline call through the same
+pool policy to real Azure OpenAI. The mock proves the routing; the real AOAI
+backend proves the inference.
+
+Routing mode mirrors the four demonstration phases: **CALL 1**, **CALL 2**,
+**FAULT**, and **RECOVER**. It displays the observed `x-served-by` value for
+every call, keeps a 30-call East:Central distribution with an expected
+approximately 2:1 ratio, faults East first so Central receives priority-1
+traffic, then faults both primaries to show PAYG spillover. Fault controls are
+healed in `finally`, and a separate heal-everything cell is available at any
+time.
+
+The client request code is printed once and remains byte-identical in every
+phase: the same URL, headers, and body are reused. **No client change at all;
+the backend ID changes in traces -- resilience without touching application
+code.**
 
 Routing is a **per-call** priority -> weight -> health decision; a circuit-open
 member is removed from selection. Keep identical model and version deployments

@@ -3,6 +3,8 @@ import json
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +69,64 @@ class NotebookContentTests(unittest.TestCase):
             'streaming_result["status"] == 200 and streaming_result["saw_done"]',
             source,
         )
+
+    def test_demo4_notebook_has_observable_four_phase_routing_demo(self):
+        notebook = json.loads(
+            (ROOT / "notebooks" / "demo4-resilient-pool.ipynb").read_text(encoding="utf-8")
+        )
+        source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
+        self.assertIn("## Routing mode -- CALL 1", source)
+        self.assertIn("## Routing mode -- CALL 2 and observed weighting", source)
+        self.assertIn("## Routing mode -- FAULT", source)
+        self.assertIn("## Routing mode -- RECOVER", source)
+        self.assertIn("x-served-by", source)
+        self.assertIn("configure_mode(\"inference\")", source)
+        self.assertIn("no client change at all; the backend ID changes in traces", source)
+        self.assertIn("subscription_required=True", source)
+        self.assertIn("MOCK_BACKEND_CREDENTIALS", source)
+
+    def test_demo4_fault_and_heal_helpers_update_named_values(self):
+        notebook = json.loads(
+            (ROOT / "notebooks" / "demo4-resilient-pool.ipynb").read_text(encoding="utf-8")
+        )
+        tree = ast.parse("\n".join(
+            "".join(cell.get("source", []))
+            for cell in notebook["cells"]
+            if cell["cell_type"] == "code"
+        ))
+        helper_names = {"set_mock_member", "fault_member", "heal_member", "heal_all"}
+        helpers = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name in helper_names
+        ]
+        fake_apim = SimpleNamespace(ensure_named_value=Mock())
+        namespace = {
+            "CIRCUIT_TRIP_SECONDS": 60,
+            "MEMBER_BACKEND_IDS": {
+                "east": "demo4-ptu-east",
+                "central": "demo4-ptu-central",
+                "payg": "demo4-payg",
+            },
+            "cfg": SimpleNamespace(subscription_id="sub", resource_group="rg", apim_name="apim"),
+            "apim": fake_apim,
+        }
+        exec(compile(ast.Module(body=helpers, type_ignores=[]), "<demo4>", "exec"), namespace)
+
+        namespace["fault_member"]("east", retry_after=42)
+        fault_calls = fake_apim.ensure_named_value.call_args_list[:2]
+        self.assertEqual(fault_calls[0].args[3:6], ("demo4-mock-fault-east",
+                                                     "demo4-mock-fault-east", "429"))
+        self.assertEqual(fault_calls[1].args[3:6], ("demo4-mock-retry-after-east",
+                                                     "demo4-mock-retry-after-east", "42"))
+        namespace["heal_member"]("east")
+        namespace["heal_all"]()
+
+        calls = fake_apim.ensure_named_value.call_args_list
+        values_by_id = {call.args[3]: call.args[5] for call in calls}
+        self.assertEqual(values_by_id["demo4-mock-fault-east"], "healthy")
+        self.assertEqual(values_by_id["demo4-mock-retry-after-east"], "60")
+        self.assertIn("demo4-mock-fault-central", values_by_id)
+        self.assertIn("demo4-mock-fault-payg", values_by_id)
 
 
 if __name__ == "__main__":

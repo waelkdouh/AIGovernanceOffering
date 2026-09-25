@@ -232,24 +232,47 @@ def ensure_backend_pool(
 
     Uses the module's APIM API version, which supports both Pool backends and
     the circuit breaker properties used by Demo 4.
+
+    APIM's BackendPoolItem contract defines `pool.services[].id` as "the unique
+    ARM id of the backend entity" (format `arm-id`), i.e. the bare path
+    `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ApiManagement/
+    service/{apim}/backends/{name}`. A short backend name is rejected with
+    `ValidationError: Invalid field 'pool.services[N].id' specified`, so each
+    member id is normalized here. Callers may pass a short backend name, a bare
+    ARM id, or an ARM id prefixed with ARM_BASE (the prefix is stripped).
+    `url` and `protocol` are only required for `Single` backends, so a Pool
+    backend omits them.
     """
     if not members:
         raise ValueError("Pool must contain at least one member.")
+    scope = _service_scope(subscription_id, resource_group, apim_name)
+    backends_path = f"{scope.removeprefix(ARM_BASE)}/backends"
+    services: List[Dict[str, Any]] = []
     for member in members:
-        if not member.get("id"):
+        member_id = member.get("id")
+        if not member_id or not isinstance(member_id, str):
             raise ValueError("Every pool member must specify a backend 'id'.")
         for field_name in ("priority", "weight"):
             value = member.get(field_name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(
-                    f"Pool member {member['id']!r} {field_name} must be a positive integer."
+                    f"Pool member {member_id!r} {field_name} must be a positive integer."
                 )
-    url = f"{_service_scope(subscription_id, resource_group, apim_name)}/backends/{backend_id}"
+        if member_id.startswith(ARM_BASE):
+            arm_id = member_id.removeprefix(ARM_BASE)
+        elif member_id.startswith("/"):
+            arm_id = member_id
+        else:
+            arm_id = f"{backends_path}/{member_id}"
+        services.append(
+            {"id": arm_id, "priority": member["priority"], "weight": member["weight"]}
+        )
+    url = f"{scope}/backends/{backend_id}"
     body = {
         "properties": {
             "type": "Pool",
             "description": description or backend_id,
-            "pool": {"services": members},
+            "pool": {"services": services},
         }
     }
     response = _request("PUT", url, json_body=body)

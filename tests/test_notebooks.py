@@ -82,6 +82,8 @@ class NotebookContentTests(unittest.TestCase):
         self.assertIn("x-served-by", source)
         self.assertIn("configure_mode(\"inference\")", source)
         self.assertIn("no client change at all; the backend ID changes in traces", source)
+        self.assertIn("subscription_required=True", source)
+        self.assertIn("MOCK_BACKEND_CREDENTIALS", source)
 
     def test_demo4_fault_and_heal_helpers_update_named_values(self):
         notebook = json.loads(

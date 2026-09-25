@@ -56,13 +56,19 @@
           <set-body>{"id":"demo4-mock-central","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Mock routing response from Central."},"finish_reason":"stop"}]}</set-body>
         </return-response>
       </when>
-      <otherwise>
+      <when condition="@(context.Operation.Id == &quot;payg&quot;)">
         <return-response>
           <set-status code="200" reason="OK" />
           <set-header name="x-served-by" exists-action="override">
             <value>demo4-payg</value>
           </set-header>
           <set-body>{"id":"demo4-mock-payg","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Mock routing response from PAYG."},"finish_reason":"stop"}]}</set-body>
+        </return-response>
+      </when>
+      <otherwise>
+        <return-response>
+          <set-status code="404" reason="Not Found" />
+          <set-body>{"error":{"code":"demo4_mock_operation_not_found","message":"Unknown Demo 4 mock operation."}}</set-body>
         </return-response>
       </otherwise>
     </choose>

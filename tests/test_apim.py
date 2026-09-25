@@ -132,6 +132,10 @@ class ApimPolicyTests(unittest.TestCase):
                 if header.attrib.get("name") == "Retry-After"
             )
             self.assertIn("demo4-mock-retry-after-", retry_after.findtext("value"))
+        self.assertEqual(
+            policy.find("./inbound/choose/otherwise/return-response/set-status").attrib["code"],
+            "404",
+        )
 
 
 class EnsureBackendTests(unittest.TestCase):

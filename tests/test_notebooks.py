@@ -101,8 +101,8 @@ class NotebookContentTests(unittest.TestCase):
         ]
         fake_apim = SimpleNamespace(ensure_named_value=Mock())
         namespace = {
-            "CIRCUIT_TRIP_SECONDS": 65,
-            "MOCK_MEMBER_IDS": {
+            "CIRCUIT_TRIP_SECONDS": 60,
+            "MEMBER_BACKEND_IDS": {
                 "east": "demo4-ptu-east",
                 "central": "demo4-ptu-central",
                 "payg": "demo4-payg",
@@ -124,7 +124,7 @@ class NotebookContentTests(unittest.TestCase):
         calls = fake_apim.ensure_named_value.call_args_list
         values_by_id = {call.args[3]: call.args[5] for call in calls}
         self.assertEqual(values_by_id["demo4-mock-fault-east"], "healthy")
-        self.assertEqual(values_by_id["demo4-mock-retry-after-east"], "65")
+        self.assertEqual(values_by_id["demo4-mock-retry-after-east"], "60")
         self.assertIn("demo4-mock-fault-central", values_by_id)
         self.assertIn("demo4-mock-fault-payg", values_by_id)
 

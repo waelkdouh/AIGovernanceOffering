@@ -1,12 +1,28 @@
-# AI Governance Workshop
+<div align="center">
 
-A hands-on workshop demonstrating how to govern AI workloads (starting with
-Azure OpenAI behind Azure API Management) using policy-driven controls:
-token limits and quotas, and more governance patterns to come.
+# ✨ AI Governance Labs
 
-The workshop is delivered as a set of Python Jupyter notebooks that create
-everything they need on an existing APIM instance, apply governance
-policies, and then demonstrate the resulting behavior live.
+[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-blue?style=flat-square)](LICENSE)
+[![Policies](https://img.shields.io/badge/Policies-4-7c3aed?style=flat-square)](policies/)
+[![Notebooks](https://img.shields.io/badge/Notebooks-5-2563eb?style=flat-square)](notebooks/)
+[![Powered by](https://img.shields.io/badge/Powered%20by-Azure%20API%20Management-0078D4?style=flat-square&logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/azure/api-management/)
+
+### Govern Microsoft Foundry Models behind Azure API Management &mdash; with policy, not application code
+
+<img src="docs/ai-governance-flows.svg" alt="AI Governance Labs — animated end-to-end flow of all four labs" width="100%">
+
+</div>
+
+---
+
+A hands-on lab series demonstrating how to govern AI workloads (Microsoft
+Foundry Models behind Azure API Management) using policy-driven controls:
+token limits and quotas, chargeback metering, bidirectional content safety,
+and resilient backend pools.
+
+Each lab is delivered as a Python Jupyter notebook that creates everything it
+needs on an existing APIM instance, applies governance policies, and then
+demonstrates the resulting behavior live.
 
 ## Prerequisites
 
@@ -17,12 +33,11 @@ policies, and then demonstrate the resulting behavior live.
   use `AzureCliCredential` (falling back to `DefaultAzureCredential`) and
   never open an interactive browser login.
 - **Python 3.10+**
-- An **Azure OpenAI** resource with a chat-completion model deployed (e.g.
-  `gpt-4o-mini`), and either:
+- A **Microsoft Foundry / Azure OpenAI** resource with a chat-completion
+  model deployed (e.g. `gpt-4o-mini`), and either:
   - the APIM system-assigned managed identity granted the
-    `Cognitive Services OpenAI User` role on the Azure OpenAI resource
-    (preferred), or
-  - an Azure OpenAI API key (used as a fallback).
+    `Cognitive Services OpenAI User` role on the resource (preferred), or
+  - an API key (used as a fallback).
 - **For Demo 3 only:** an **Azure AI Content Safety** resource (kind
   "Content Safety"), and either:
   - the APIM system-assigned managed identity granted the
@@ -31,7 +46,7 @@ policies, and then demonstrate the resulting behavior live.
   - a Content Safety API key (used as a fallback).
 - **For Demo 4:** an APIM SKU supporting backend pools and circuit breakers:
   **Basic v2, Standard v2, Premium v2, or classic Standard/Premium**. Extra
-  Azure OpenAI endpoints are optional; without them the notebook uses one
+  model endpoints are optional; without them the notebook uses one
   origin as three logical members. All pool members must use the **same model
   and version** to avoid silent model drift.
 
@@ -44,7 +59,7 @@ supported on **Developer**, **Basic**, **Basic v2**, **Standard**,
 running Demo 1 -- `00-setup-and-validation.ipynb` will print your instance's
 SKU as part of its checks.
 
-`llm-token-limit` is preferred over the Azure OpenAI-specific predecessor,
+`llm-token-limit` is preferred over the provider-specific predecessor,
 `azure-openai-token-limit`, because it supports Foundry models,
 OpenAI-compatible APIs, Anthropic, and Vertex AI. It provides both TPM rate
 limiting and long-term quotas through `token-quota` and
@@ -110,6 +125,8 @@ README.md                      # this file
 requirements.txt               # Python dependencies
 .env.example                   # config template (copy to .env, or let notebooks prompt you)
 .gitignore
+docs/
+  ai-governance-flows.svg      # animated end-to-end flow diagram for all four demos
 shared/
   config.py                    # load/prompt config, persist to .env, validate
   apim.py                      # idempotent APIM control-plane helpers (ARM REST)
@@ -148,7 +165,7 @@ there.
 Demo 1 shows a complete, idempotent, end-to-end flow:
 
 1. Creates a dedicated APIM subscription and product for isolation, plus the
-   Azure OpenAI-backed API, backend, named values, and operation -- all
+   model-backed API, backend, named values, and operation -- all
    before any calls are made.
 2. Applies a policy at **API scope** using `llm-token-limit` for both the
    tokens-per-minute limit and the native daily `token-quota`.
@@ -167,8 +184,8 @@ fail or duplicate any Azure resources.
 
 ## Demo 2: Token metering & chargeback dimensions
 
-Demo 2 builds on the **same APIM instance** and Azure OpenAI / Microsoft
-Foundry backend values used in Demo 1. It creates only Demo 2-scoped APIM
+Demo 2 builds on the **same APIM instance** and Microsoft Foundry / Azure
+OpenAI backend values used in Demo 1. It creates only Demo 2-scoped APIM
 resources on that existing instance:
 
 1. A dedicated product (`demo2-metering`) and subscription
@@ -217,8 +234,8 @@ streams can produce incomplete counts.
 
 ## Demo 3: Content safety - inspect both directions
 
-Demo 3 builds on the **same APIM instance** and Azure OpenAI / Microsoft
-Foundry backend values used in Demos 1 and 2. It additionally requires a new
+Demo 3 builds on the **same APIM instance** and Microsoft Foundry / Azure
+OpenAI backend values used in Demos 1 and 2. It additionally requires a new
 **Azure AI Content Safety** resource (kind "Content Safety") and, if you are
 not supplying a key, an APIM managed-identity role assignment on it (see
 Prerequisites above).
@@ -228,7 +245,7 @@ Demo 3 creates only Demo 3-scoped APIM resources on the existing instance:
 1. A dedicated product (`demo3-content-safety`) and subscription
    (`demo3-content-safety-sub`) for isolation.
 2. A dedicated API (`demo3-content-safety-api` at path
-   `/demo3-content-safety`), the Azure OpenAI backend
+   `/demo3-content-safety`), the model backend
    (`demo3-openai-backend`), a new Content Safety backend
    (`demo3-content-safety-backend`), and the `chat-completions` operation.
 3. Named values for the four category thresholds (`Hate`, `SelfHarm`,
@@ -289,7 +306,7 @@ this by showing the stream end early, with no trailing `[DONE]` event.
 > a compliance risk and it makes results unrepeatable. The fixtures shipped
 > here are deliberately mild, non-graphic, clearly-labelled placeholders that
 > exercise the mechanism only; substitute your own organization's
-> pre-approved evaluation-set fixtures before using this in a real workshop.
+> pre-approved evaluation-set fixtures before delivering this to an audience.
 
 Demo 3 leaves its APIM resources in place -- Demo 4 reuses the same APIM
 instance, so cleanup is covered at the end of the final demo. Re-running
@@ -298,7 +315,7 @@ duplicate any Azure resources.
 
 ## Demo 4: Resilient backend pools
 
-Demo 4 reuses the same APIM instance and Azure OpenAI / Microsoft Foundry
+Demo 4 reuses the same APIM instance and Microsoft Foundry / Azure OpenAI
 configuration from Demos 1-3. It creates only Demo 4-scoped resources:
 
 1. An APIM-hosted mock-origin API (`demo4-mock-origin-api`) with East,
@@ -322,7 +339,7 @@ configuration from Demos 1-3. It creates only Demo 4-scoped resources:
 
 The notebook has two explicit modes: **routing mode** points the pool at the
 mock members, while **inference mode** makes a baseline call through the same
-pool policy to real Azure OpenAI. The mock proves the routing; the real AOAI
+pool policy to the real model endpoint. The mock proves the routing; the real
 backend proves the inference.
 
 Routing mode mirrors the four demonstration phases: **CALL 1**, **CALL 2**,

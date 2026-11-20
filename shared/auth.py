@@ -10,6 +10,7 @@ browser auth flow is used.
 from __future__ import annotations
 
 import functools
+import shutil
 import subprocess
 from typing import Optional
 
@@ -45,7 +46,7 @@ def get_current_subscription_id() -> Optional[str]:
     """Best-effort lookup of the current `az` default subscription id."""
     try:
         result = subprocess.run(
-            ["az", "account", "show", "--query", "id", "-o", "tsv"],
+            [shutil.which("az") or "az", "account", "show", "--query", "id", "-o", "tsv"],
             capture_output=True,
             text=True,
             check=True,
